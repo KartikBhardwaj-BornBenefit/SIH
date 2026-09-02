@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Vision benchmark suite</title>
+    <style>
+      :root { color-scheme: light; }
+      body { font-family: Georgia, serif; margin: 0 auto; max-width: 860px; padding: 24px; color: #1b1b1b; }
+      h1, h2 { font-family: "Segoe UI", sans-serif; }
+      section { margin: 28px 0; padding: 18px; border: 1px solid #ddd; background: #fff; }
+      label { display: block; margin: 8px 0 4px; }
+      input, button { font: inherit; padding: 6px 8px; }
+      img, canvas { max-width: 100%; height: auto; display: block; margin-top: 8px; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; }
+      .row img { width: 240px; }
+      .note { color: #555; font-size: 14px; }
+      nav a { margin-right: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>Local vision benchmark</h1>
+    <p class="note">
+      Open this tab, then use the extension:
+      <strong>Analyze current page</strong> for DOM,
+      <strong>Analyze current screen</strong> for YOLOS-Tiny.
+      Enable OCR to read painted text. Nothing is uploaded.
+    </p>
+    <nav>
+      <a href="#test-a">A</a> <a href="#test-b">B</a> <a href="#test-c">C</a>
+      <a href="#test-d">D</a> <a href="#test-e">E</a> <a href="#test-f">F</a>
+      <a href="#test-g">G</a> <a href="#test-h">H</a>
+    </nav>
+
+    <section id="test-a">
+      <h2>Test A — normal webpage</h2>
+      <p>Ordinary HTML the DOM extractor should understand without vision.</p>
+      <button type="button">Continue</button>
+      <a href="#test-b">Go to password test</a>
+    </section>
+
+    <section id="test-b">
+      <h2>Test B — password</h2>
+      <p>DOM should flag this. YOLOS should not need to.</p>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" placeholder="Password" autocomplete="current-password">
+    </section>
+
+    <section id="test-c">
+      <h2>Test C — email</h2>
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email">
+    </section>
+
+    <section id="test-d">
+      <h2>Test D — face</h2>
+      <p class="note">DOM sees an image. Vision may report a person. Synthetic test photo.</p>
+      <img src="assets/face-portrait.png" alt="Portrait photograph of a person">
+    </section>
+
+    <section id="test-e">
+      <h2>Test E — multiple faces</h2>
+      <img src="assets/faces-group.png" alt="Photograph of several people">
+    </section>
+
+    <section id="test-f">
+      <h2>Test F — text embedded in an image</h2>
+      <p class="note">The email exists only as pixels. OCR should be able to read it; DOM cannot.</p>
+      <img id="email-image" alt="Image containing an email address">
+    </section>
+
+    <section id="test-g">
+      <h2>Test G — canvas</h2>
+      <p class="note">Sensitive-looking text painted on a canvas. DOM only sees &lt;canvas&gt;.</p>
+      <canvas id="pii-canvas" width="520" height="140"></canvas>
+    </section>
+
+    <section id="test-h">
+      <h2>Test H — mixed content</h2>
+      <p>A compact page mixing HTML, a form, a face, embedded text, and canvas.</p>
+      <button type="button">Submit application</button>
+      <label for="mix-email">Email</label>
+      <input id="mix-email" type="email" placeholder="jane@example.com">
+      <label for="mix-password">Password</label>
+      <input id="mix-password" type="password" placeholder="Password">
+      <div class="row">
+        <img src="assets/face-portrait.png" width="220" alt="Applicant photo">
+        <canvas id="mix-canvas" width="280" height="120"></canvas>
+      </div>
+    </section>
+
+    <script>
+      function paintEmail(img) {
+        var canvas = document.createElement("canvas");
+        canvas.width = 480;
+        canvas.height = 140;
+        var ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#f4f1ea";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#1f2a24";
+        ctx.font = "28px serif";
+        ctx.fillText("Contact", 24, 48);
+        ctx.font = "26px monospace";
+        ctx.fillText("john@example.com", 24, 96);
+        img.src = canvas.toDataURL("image/png");
+      }
+
+      function paintCanvas(canvas, lines) {
+        var ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#10231c";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#e8f5ef";
+        ctx.font = "18px monospace";
+        lines.forEach(function (line, i) {
+          ctx.fillText(line, 16, 36 + i * 28);
+        });
+      }
+
+      paintEmail(document.getElementById("email-image"));
+      paintCanvas(document.getElementById("pii-canvas"), [
+        "Aadhaar (sample): 1234 5678 9012",
+        "Do not treat this as a real ID"
+      ]);
+      paintCanvas(document.getElementById("mix-canvas"), [
+        "PAN (sample): ABCDE1234F",
+        "Canvas text only"
+      ]);
+    </script>
+  </body>
+</html>

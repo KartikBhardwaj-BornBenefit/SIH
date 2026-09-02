@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Shopping Cart Login</title>
+    <style>
+      body {
+        font-family: Georgia, serif;
+        max-width: 480px;
+        margin: 40px auto;
+        color: #222;
+      }
+      label {
+        display: block;
+        margin: 12px 0 4px;
+      }
+      input,
+      select,
+      textarea,
+      button {
+        font: inherit;
+        padding: 6px 8px;
+      }
+      .row {
+        margin: 16px 0;
+      }
+      img {
+        width: 48px;
+        height: 48px;
+        background: #ddd;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Shopping Cart</h1>
+    <p>Sign in to check out. This page is only for testing the extension locally.</p>
+
+    <form>
+      <div class="row">
+        <label for="email">Email address</label>
+        <input id="email" name="email" type="email" placeholder="Email address" autocomplete="email">
+      </div>
+
+      <div class="row">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" placeholder="Password" autocomplete="current-password">
+      </div>
+
+      <div class="row">
+        <label>
+          <input type="checkbox" name="remember"> Remember me
+        </label>
+      </div>
+
+      <div class="row">
+        <button type="button">Login</button>
+        <a href="/forgot">Forgot password?</a>
+      </div>
+
+      <div class="row">
+        <label for="phone">Phone</label>
+        <input id="phone" name="phone" type="tel" placeholder="Phone number">
+      </div>
+
+      <div class="row">
+        <label for="aadhaar">Aadhaar number</label>
+        <input id="aadhaar" name="aadhaar" type="text" placeholder="Aadhaar">
+      </div>
+
+      <div class="row">
+        <label for="country">Country</label>
+        <select id="country" name="country">
+          <option>India</option>
+          <option>United States</option>
+          <option>Singapore</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="notes">Order notes</label>
+        <textarea id="notes" name="notes" placeholder="Anything we should know?"></textarea>
+      </div>
+    </form>
+
+    <h2>Items</h2>
+    <img alt="Product thumbnail" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">
+    <p>Hidden token field below should not appear in the snapshot:</p>
+    <input type="hidden" name="csrf" value="should-not-be-extracted">
+  </body>
+</html>

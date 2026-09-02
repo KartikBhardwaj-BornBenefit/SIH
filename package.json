@@ -1,0 +1,17 @@
+{
+  "name": "privacy-preserving-browser-agent",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Local-only Chrome extension: DOM extraction plus a swappable on-device vision baseline.",
+  "scripts": {
+    "build": "node scripts/build-vision.mjs",
+    "postinstall": "node scripts/build-vision.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.5.2",
+    "tesseract.js": "^6.0.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9"
+  }
+}

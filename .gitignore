@@ -1,0 +1,7 @@
+node_modules/
+src/offscreen/offscreen.bundle.js
+src/offscreen/offscreen.bundle.js.map
+vendor/
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Visibility Filter Test</title>
+    <style>
+      body {
+        font-family: Georgia, serif;
+        margin: 24px;
+        color: #111;
+        background: #fafafa;
+      }
+      section {
+        margin: 24px 0;
+        padding: 16px;
+        border: 1px solid #ddd;
+        background: #fff;
+      }
+      .display-none { display: none; }
+      .visibility-hidden { visibility: hidden; }
+      .zero-size {
+        display: block;
+        width: 0;
+        height: 0;
+        overflow: hidden;
+      }
+      .collapsed-menu {
+        height: 0;
+        overflow: hidden;
+      }
+      .modal {
+        position: fixed;
+        right: 16px;
+        top: 16px;
+        z-index: 20;
+        padding: 12px 16px;
+        background: #1f6f56;
+        color: #fff;
+        border-radius: 8px;
+      }
+      .below-fold {
+        margin-top: 2200px;
+        padding: 24px;
+        background: #eef6f2;
+      }
+      nav.old-sih a {
+        display: inline-block;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 id="page-heading">Visibility Filter Test</h1>
+    <p id="intro-copy">This page has visible controls, hidden leftovers, a modal, and a button far below the fold.</p>
+
+    <section>
+      <h2 id="visible-heading">On-screen controls</h2>
+      <button id="visible-button" type="button">Visible submit</button>
+      <a id="visible-link" href="/visible">Visible link</a>
+      <label for="visible-email">Email</label>
+      <input id="visible-email" type="email" placeholder="you@example.com">
+    </section>
+
+    <section>
+      <h2>Should be excluded from Visible DOM</h2>
+      <button id="display-none-button" class="display-none" type="button">Display none button</button>
+      <a id="visibility-hidden-link" class="visibility-hidden" href="/hidden">Visibility hidden link</a>
+      <a id="zero-size-link" class="zero-size" href="/zero">Zero size link</a>
+      <input id="hidden-input" type="hidden" name="csrf" value="token">
+      <div hidden>
+        <a id="hidden-attr-link" href="/legacy">Hidden attribute link</a>
+      </div>
+      <nav id="old-sih-nav" class="display-none">
+        <a id="old-sih-2023" href="/sih-2023">SIH 2023</a>
+        <a id="old-sih-2024" href="/sih-2024">SIH 2024</a>
+      </nav>
+      <div class="collapsed-menu">
+        <a id="collapsed-menu-link" href="/old-menu">Collapsed menu link</a>
+      </div>
+    </section>
+
+    <details id="closed-details">
+      <summary id="details-summary">Collapsed section</summary>
+      <a id="details-hidden-link" href="/inside-details">Link inside closed details</a>
+      <button id="details-hidden-button" type="button">Button inside closed details</button>
+    </details>
+
+    <div class="modal" id="visible-modal">
+      <p>Visible modal</p>
+      <button id="modal-button" type="button">Dismiss modal</button>
+    </div>
+
+    <div class="below-fold">
+      <h2 id="below-fold-heading">Below the viewport</h2>
+      <p>This block is far down the page so Current Viewport should omit it until you scroll.</p>
+      <button id="below-fold-button" type="button">Below-fold button</button>
+    </div>
+  </body>
+</html>

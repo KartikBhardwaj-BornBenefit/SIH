@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Privacy-Preserving Browser Agent",
+  "version": "0.2.0",
+  "description": "Local DOM extraction plus an on-device vision baseline. Screenshots are never uploaded.",
+  "action": {
+    "default_title": "Analyze current page",
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background/serviceWorker.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["activeTab", "scripting", "offscreen", "unlimitedStorage", "storage"],
+  "host_permissions": [
+    "https://huggingface.co/*",
+    "https://*.huggingface.co/*",
+    "https://*.hf.co/*",
+    "https://tessdata.projectnaptha.com/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  }
+}
