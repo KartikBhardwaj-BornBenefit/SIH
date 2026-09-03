@@ -75,6 +75,63 @@ function strongerLevel(current, next) {
   return "unknown";
 }
 
+function pixelRegions(snapshot, vision, tags) {
+  var viewport = snapshot && snapshot.viewport;
+  var image = vision && vision.image;
+  if (!viewport || !image || !image.width || !image.height) {
+    return [];
+  }
+  var cssWidth = viewport.visualWidth || viewport.width || 0;
+  var cssHeight = viewport.visualHeight || viewport.height || 0;
+  if (!cssWidth || !cssHeight) {
+    return [];
+  }
+  var scaleX = image.width / cssWidth;
+  var scaleY = image.height / cssHeight;
+  var offsetLeft = viewport.offsetLeft || 0;
+  var offsetTop = viewport.offsetTop || 0;
+  return ((snapshot && snapshot.elements) || [])
+    .filter(function (element) {
+      return tags.indexOf(element.tag || element.kind) !== -1;
+    })
+    .map(function (element) {
+      var box = element.viewportBox;
+      if (!box && element.boundingBox) {
+        box = {
+          x: element.boundingBox.x - (viewport.scrollX || 0),
+          y: element.boundingBox.y - (viewport.scrollY || 0),
+          width: element.boundingBox.width,
+          height: element.boundingBox.height
+        };
+      }
+      return box
+        ? {
+            x: (box.x - offsetLeft) * scaleX,
+            y: (box.y - offsetTop) * scaleY,
+            width: box.width * scaleX,
+            height: box.height * scaleY
+          }
+        : null;
+    })
+    .filter(Boolean);
+}
+
+function boxOverlapsRegion(box, regions) {
+  if (!box) {
+    return false;
+  }
+  var centerX = box.x + box.width / 2;
+  var centerY = box.y + box.height / 2;
+  return regions.some(function (region) {
+    return (
+      centerX >= region.x &&
+      centerX <= region.x + region.width &&
+      centerY >= region.y &&
+      centerY <= region.y + region.height
+    );
+  });
+}
+
 function catalogIndex() {
   var byId = {};
   (BrowserAgent.SENSITIVITY_CATEGORIES || []).forEach(function (category) {
@@ -231,11 +288,13 @@ function annotatePixelSensitivity(vision, ocr, snapshot, policy) {
         return el.tag === "canvas" || el.kind === "canvas";
       })
     : false;
+  var embeddedRegions = pixelRegions(snapshot, vision, ["img", "image", "canvas"]);
+  var canvasRegions = hasCanvas ? pixelRegions(snapshot, vision, ["canvas"]) : [];
 
   var detections = ((vision && vision.detections) || []).map(function (det) {
     var copy = Object.assign({}, det);
     var cats = [];
-    if (policy.faces_people && /person/i.test(det.label || "")) {
+    if (policy.faces_people && /(?:face|person)/i.test(det.label || "")) {
       cats.push("faces_people");
     }
     copy.sensitivityCategories = cats;
@@ -249,11 +308,11 @@ function annotatePixelSensitivity(vision, ocr, snapshot, policy) {
     var copy = Object.assign({}, item);
     var cats = [];
     var level = "unknown";
-    if (policy.image_embedded_text) {
+    if (policy.image_embedded_text && boxOverlapsRegion(item.boundingBox, embeddedRegions)) {
       cats.push("image_embedded_text");
       level = strongerLevel(level, "potentially_sensitive");
     }
-    if (policy.canvas_text && hasCanvas) {
+    if (policy.canvas_text && boxOverlapsRegion(item.boundingBox, canvasRegions)) {
       cats.push("canvas_text");
       level = strongerLevel(level, "potentially_sensitive");
     }

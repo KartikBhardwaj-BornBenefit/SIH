@@ -22,6 +22,26 @@
  *   replaced. Carries placeholders and element ids but no values, so it is
  *   safe to pass around for drawing masks.
  *
+ * @typedef {object} NormalizedDetection
+ * @property {string} category Value-free sensitivity category
+ * @property {"dom"|"validator"|"ner"|"ocr"|"vision"} source
+ * @property {number} confidence Number from 0 to 1
+ * @property {BoundingBox} boundingRect Rectangle in screenshot pixels
+ * @property {"screenshot_px"} coordinateSystem
+ * @property {"black"|"pixelate"} redactionPolicy
+ * @property {string|null} elementId Safe `element_N` id when DOM-associated
+ * @property {string} reason Evidence type without the detected value
+ *
+ * @typedef {object} SanitizedScreenshot
+ * @property {true} sanitized Required brand checked before network use
+ * @property {"sanitized-screenshot-v1"} kind
+ * @property {string} dataUrl Newly rendered JPEG; never the captured PNG
+ * @property {"image/jpeg"} mimeType
+ * @property {number} width
+ * @property {number} height
+ * @property {number} byteLength
+ * @property {object} redaction Counts and method only; no pixel text
+ *
  * @typedef {object} RedactionRecord
  * @property {string} placeholder e.g. `<EMAIL_2>`
  * @property {string} category Catalog id
@@ -32,17 +52,20 @@
  * @property {boolean} [reused] The value had already been seen, so an existing
  *   placeholder was reused. One value always maps to one placeholder.
  * @property {boolean} [oneWay] A credential: placeholder minted, no vault entry
+ * @property {number} [score] Present on `confidence: "model"` records. The
+ *   grouped entity score; not a checksum.
  *
  * @typedef {"field-purpose" | "value" | "control-value"} SensitivitySource
  *   field-purpose — keyword/attribute match: the control *asks* for this data
  *   value         — an identifier was found in text the page renders
  *   control-value — an identifier was found in a value the user typed
  *
- * @typedef {"keyword" | "shape" | "structure" | "checksum"} SensitivityConfidence
+ * @typedef {"keyword" | "shape" | "structure" | "checksum" | "model"} SensitivityConfidence
  *   keyword   — attribute or label wording only
  *   shape     — pattern only; admitted just with a corroborating keyword
  *   structure — pattern plus a structural rule (fixed chars, valid charset)
  *   checksum  — pattern plus an arithmetic check digit (Verhoeff, Luhn, mod-36)
+ *   model     — token-classification span from the local NER pass
  *
  * @typedef {object} SensitivitySignal
  * @property {string} category Catalog id that matched
@@ -52,6 +75,9 @@
  *   text. Present only for `via: "value"`. The text itself is not stored; a
  *   later phase recomputes it from the live DOM to apply a redaction.
  * @property {number} [length] Length of the match in that same string
+ * @property {number} [score] Present on `confidence: "model"` signals. The
+ *   span is already replaced by a placeholder of a different length, so
+ *   offsets are omitted for model hits and this score is the remaining evidence.
  *
  * @typedef {"heading" | "button" | "link" | "input" | "textarea" | "select"
  *   | "checkbox" | "radio" | "image" | "label" | "text" | "canvas" | "video"} ElementKind

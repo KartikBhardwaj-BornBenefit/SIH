@@ -38,6 +38,24 @@ var SENSITIVITY_CATEGORIES = [
     patterns: [/\botp\b/i, /one[-\s]?time/i, /one[-\s]?time[-\s]?code/i, /ओटीपी/, /एकबारीय/]
   },
   {
+    id: "authentication_secret",
+    group: "credentials",
+    groupLabel: "Credentials",
+    label: "Authentication / session secrets",
+    description: "API keys, bearer tokens, access tokens and session identifiers.",
+    source: "dom",
+    level: "sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [
+      /api[-_\s]?key/i,
+      /access[-_\s]?token/i,
+      /auth(?:orization)?[-_\s]?token/i,
+      /bearer[-_\s]?token/i,
+      /session[-_\s]?(?:id|token)/i
+    ]
+  },
+  {
     id: "username",
     group: "credentials",
     groupLabel: "Credentials",
@@ -185,7 +203,7 @@ var SENSITIVITY_CATEGORIES = [
     group: "identity",
     groupLabel: "Personal identity",
     label: "Person name",
-    description: "Full name, first name, last name, surname.",
+    description: "Name fields, plus names in English prose via the local NER model. Hindi names in running text are not covered by the current checkpoint.",
     source: "dom",
     level: "potentially_sensitive",
     defaultEnabled: true,
@@ -296,7 +314,7 @@ var SENSITIVITY_CATEGORIES = [
     group: "visual",
     groupLabel: "Visual / pixels",
     label: "Faces / people in photos",
-    description: "Treat YOLOS 'person' boxes as potentially sensitive. Not a dedicated face model.",
+    description: "Faces found by the compact local YuNet detector.",
     source: "vision",
     level: "potentially_sensitive",
     defaultEnabled: true

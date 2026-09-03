@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Browser Agent Architecture Review</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f7f5;
+      --fg: #1b1b18;
+      --muted: #5c5c56;
+      --faint: #7a7a72;
+      --card: #ffffff;
+      --line: #d9d9d1;
+      --fill: #efefe9;
+      --accent: #1d6fd8;
+      --on-accent: #ffffff;
+      --info: #e8f1fc;
+      --warn: #f8f0dc;
+      --ok: #e6f4ea;
+      --danger: #f8e4e4;
+      --success: #1f7a3a;
+      --warning: #9a6b12;
+      --danger-fg: #b42318;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #18181a;
+        --fg: #ecece8;
+        --muted: #b3b3ab;
+        --faint: #8b8b84;
+        --card: #222226;
+        --line: #3a3a40;
+        --fill: #2a2a30;
+        --accent: #6ea8ff;
+        --on-accent: #101014;
+        --info: #1d2a3d;
+        --warn: #3a3118;
+        --ok: #1b2d22;
+        --danger: #3a2020;
+        --success: #7dcea0;
+        --warning: #e6c07b;
+        --danger-fg: #f0a0a0;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.5 "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    .wrap { max-width: 1380px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 24px; line-height: 30px; font-weight: 650; margin: 0; }
+    h2 { font-size: 18px; line-height: 24px; font-weight: 650; margin: 0 0 8px; }
+    h3 { font-size: 16px; line-height: 22px; font-weight: 650; margin: 18px 0 8px; }
+    p { margin: 0; }
+    .muted { color: var(--muted); }
+    .faint { color: var(--faint); font-size: 12px; }
+    .header { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+    .nav {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      padding: 10px 0; margin: 18px 0;
+    }
+    .pill {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--fg);
+      border-radius: 999px;
+      padding: 5px 11px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .pill.active { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+    .stack { display: flex; flex-direction: column; gap: 20px; }
+    .grid { display: grid; gap: 12px; }
+    .g2 { grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); }
+    .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .flow { display: grid; gap: 8px; align-items: stretch; }
+    .flow-4 { grid-template-columns: 1fr 30px 1fr 30px 1fr 30px 1fr; }
+    .flow-3 { grid-template-columns: 1fr 30px 1fr 30px 1fr; }
+    .card, .node {
+      border: 1px solid var(--line);
+      background: var(--card);
+      border-radius: 8px;
+    }
+    .card { overflow: hidden; }
+    .card h4 {
+      margin: 0; padding: 10px 12px; font-size: 12px; font-weight: 650;
+      border-bottom: 1px solid var(--line);
+    }
+    .card .body { padding: 12px; }
+    .node { padding: 12px; min-height: 78px; }
+    .node.accent { border-color: var(--accent); background: var(--fill); }
+    .node strong { display: block; }
+    .node span { display: block; color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .arrow { display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 18px; }
+    .stats { display: flex; flex-wrap: wrap; gap: 24px; }
+    .stat { min-width: 110px; }
+    .stat b { display: block; font-size: 22px; line-height: 28px; }
+    .stat small { color: var(--muted); }
+    .ok { color: var(--success); }
+    .warn-fg { color: var(--warning); }
+    .callout { border-radius: 8px; padding: 12px 14px; }
+    .callout.info { background: var(--info); }
+    .callout.warning { background: var(--warn); }
+    .callout.neutral { background: var(--fill); }
+    .callout strong { display: block; margin-bottom: 4px; }
+    ul { margin: 0; padding: 0; list-style: none; }
+    ul li { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 8px; }
+    ul li::before { content: "—"; color: var(--accent); }
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 9px 11px; vertical-align: top; border-bottom: 1px solid var(--line); }
+    th { font-weight: 650; background: var(--fill); position: sticky; top: 0; }
+    tr:nth-child(even) td { background: color-mix(in srgb, var(--fill) 55%, transparent); }
+    .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 8px; background: var(--faint); }
+    .dot.danger { background: var(--danger-fg); }
+    .dot.warning { background: var(--warning); }
+    .dot.success { background: var(--success); }
+    .dot.info { background: var(--accent); }
+    hr { border: 0; border-top: 1px solid var(--line); margin: 8px 0 16px; }
+    .share-note { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    @media (max-width: 980px) {
+      .g2, .g3, .g4, .flow-4, .flow-3 { grid-template-columns: 1fr; }
+      .arrow { display: none; }
+    }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div>
+        <h1>Browser Agent Architecture Review</h1>
+        <p class="muted" style="margin-top:6px;max-width:860px">
+          Code-backed analysis of architecture, local models, privacy boundaries, model evolution,
+          evaluation evidence, limitations, and an 18-slide presentation narrative.
+        </p>
+        <p class="share-note">Standalone HTML copy. Open this file in any browser; no Cursor or internet required.</p>
+      </div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <main id="main"></main>
+    <hr>
+    <p class="faint">
+      Sources: manifest.json, README.md, ROADMAP.md, src/, server/, eval/, test/, build workflow,
+      local git log, and prior implementation transcripts. Facts are grounded in the current working
+      tree; inferred rationale and recommended work are explicitly framed as analysis.
+    </p>
+  </div>
+  <script>
+    const sections = [
+      ["overview", "Executive summary"],
+      ["architecture", "System architecture"],
+      ["pipeline", "End-to-end pipeline"],
+      ["models", "Models and rules"],
+      ["evolution", "Why models changed"],
+      ["privacy", "Privacy architecture"],
+      ["agent", "Agent and server"],
+      ["evaluation", "Evaluation evidence"],
+      ["decisions", "Architecture decisions"],
+      ["limits", "Limits and risks"],
+      ["ppt", "PPT blueprint"]
+    ];
+
+    const modelRows = [
+      ["DOM facts + sensitivity catalog", "Deterministic rules", "Every extraction", "Input types, autocomplete, labels, English and Devanagari keywords", "Declared browser facts are cheaper and more reliable than inference"],
+      ["Identifier validators", "Regex + structure + checksums", "Before every model pass", "Aadhaar, cards, GSTIN, PAN, IFSC, email, UPI, phone, credentials", "Verhoeff/Luhn/mod-36 provide stronger evidence than probabilistic confidence"],
+      ["DistilBERT NER q8", "onnx-community/distilbert-NER-ONNX", "Only when person_name is enabled", "English person names in already rule-redacted strings", "Regex cannot identify names in prose; 66 MB q8 is viable enough for lazy browser use"],
+      ["OpenCV YuNet 2023mar", "232 KB ONNX face detector", "Screen analysis and non-DOM agent modes", "Faces in screenshots, including relatively small printed portraits", "Purpose-built face model, compact, locally packaged, shares ONNX runtime"],
+      ["Tesseract.js 6", "English OCR, experimental", "Image/canvas/video present, DOM unavailable, or user forces OCR", "Pixel text and bounding boxes for masking", "DOM cannot read text painted into pixels; selective invocation limits cost"],
+      ["OpenAI-compatible planner", "Configurable server model; default config gpt-4o-mini", "Agent mode after explicit transmission consent", "Plans closed-schema browser actions from sanitized context", "Keeps large reasoning model and API key outside the extension"],
+      ["Deterministic mock planner", "No ML", "Default server provider, tests, offline demo", "Known form-filling demo actions", "Reproducible and free end-to-end validation without cloud dependence"]
+    ];
+
+    const migrationRows = [
+      ["YOLOS-Tiny → YuNet", "YOLOS recognized COCO objects such as person, not privacy-specific face regions", "YuNet detects faces directly, is about 232 KB, and can drive redaction boxes", "YOLOS remains as a reproducible Phase 2 benchmark, not production"],
+      ["BlazeFace short-range → BlazeFace full-range", "Small printed ID portraits remained false negatives when screenshots were downscaled", "Full-range plus tiled detection was tried to improve small-face recall", "Intermediate experiment; not the final architecture"],
+      ["BlazeFace → YuNet", "Selfie-oriented model still performed poorly on small/printed document portraits", "YuNet better matches browser screenshots and reuses ONNX Runtime instead of adding MediaPipe WASM", "Current production face adapter"],
+      ["BERT-base NER → DistilBERT NER", "BERT q8 was about 108 MB; WebGPU could fetch a 431 MB fp32 sibling; per-field WASM passes looked hung", "DistilBERT q8 is about 66 MB with the same CoNLL-03 PER labels; packed inference reduces passes", "Still English-only; model name in the adapter filename is now stale"],
+      ["Per-field NER → packed/chunked NER", "One forward pass per snapshot string made a completed model download appear frozen", "Short strings are packed; long text is chunked with overlap and deduplicated", "Latency optimization without changing the checkpoint"],
+      ["All OCR text sensitive → region-scoped OCR policy", "Earlier logic could classify every OCR line as image text and black out most of the screenshot", "Generic OCR masking is scoped to image/canvas regions; structured IDs still use validators anywhere", "Reduced over-redaction while preserving high-risk identifier masking"]
+    ];
+
+    const decisionRows = [
+      ["Layers, not one universal model", "DOM equality → format validation → learned models", "Use the cheapest source with the strongest evidence; reserve ML for ambiguity"],
+      ["On-demand injection", "No manifest content_scripts entry; activeTab + scripting", "The extension does not inspect every page silently and gains access after user action"],
+      ["Offscreen inference host", "YuNet, OCR, and NER run outside the MV3 service worker", "Service workers are interruptible; offscreen pages support DOM, canvas, WASM, and longer model work"],
+      ["Redact inside the content script", "Raw snapshot and vault are created in the tab's isolated world", "Unredacted values never need to cross into popup, worker, server, or logs"],
+      ["Rules before NER", "Checksum-verified identifiers become placeholders before internal NER messaging", "Even the local offscreen model receives less-sensitive text"],
+      ["One value, one placeholder", "Repeated values reuse tokens such as <EMAIL_1>", "Preserves referential meaning for the planner without exposing identity"],
+      ["Credentials are one-way", "Passwords, OTPs, CVVs, auth secrets have placeholders but no vault value", "The capability to reveal or restore these secrets does not exist"],
+      ["Closed action vocabulary", "No model-generated JavaScript, selectors, URLs, or arbitrary commands", "The LLM proposes intent; deterministic code validates and executes bounded operations"],
+      ["Dual client/server validation", "Sanitized request and returned actions are checked on both sides", "A provider cannot bypass the extension protocol merely by returning plausible JSON"],
+      ["Fresh extraction each turn", "Agent re-extracts after actions and navigation", "Reduces stale-target errors and limits plans to currently known element_N ids"]
+    ];
+
+    const risks = [
+      ["English-only name NER", "Devanagari names in prose remain unredacted; IndicNER conversion is research backlog.", "High", "danger"],
+      ["No labeled vision/OCR benchmark", "Real YuNet/OCR execute in E2E, but accuracy, IoU, pixel coverage, and over-redaction are not measured.", "High", "danger"],
+      ["Hybrid planning mismatch", "Hybrid mode pays local vision cost but does not send pixels or structured visual detections to the planner.", "High", "danger"],
+      ["Detection defines redaction coverage", "Novel identifiers and raw bank-account numbers without check digits can survive.", "High", "danger"],
+      ["Popup runtime defect", "popup.js references undeclared revealToggle and sessionVault in renderRedactionStats; this can throw during rendering.", "High", "danger"],
+      ["Prompt injection", "Page text is marked untrusted and actions are constrained, but model manipulation remains a residual risk.", "Medium", "warning"],
+      ["Destructive-action heuristic", "Confirmation detection is English keyword based; unusual labels may evade classification.", "Medium", "warning"],
+      ["DOM coverage", "Cross-origin frames, shadow roots, occlusion, contrast, and canvas semantics are incomplete.", "Medium", "warning"],
+      ["NER first-use cost", "Roughly 66 MB runtime download plus browser cache; offline first use can fail.", "Medium", "warning"],
+      ["OCR language and latency", "Packaged OCR is English and can be slow on large screenshots.", "Medium", "warning"],
+      ["Benchmark representativeness", "Sixteen synthetic pages were authored by the detector developer; results are regression evidence, not field accuracy.", "Medium", "warning"],
+      ["Repository hygiene", "Working tree contains extensive uncommitted/generated files and duplicate-looking path entries; reproducibility needs cleanup.", "Medium", "warning"],
+      ["Browser support", "Chrome/Edge only; Firefox offscreen and MV3 behavior is neither implemented nor tested.", "Low", "neutral"]
+    ];
+
+    const esc = (s) => String(s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const bullets = (items) => `<ul>${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`;
+    const node = (title, sub, accent) =>
+      `<div class="node${accent ? " accent" : ""}"><strong>${esc(title)}</strong><span>${esc(sub)}</span></div>`;
+    const arrow = () => `<div class="arrow">→</div>`;
+    const callout = (kind, title, body) =>
+      `<div class="callout ${kind}"><strong>${esc(title)}</strong>${esc(body)}</div>`;
+    const table = (headers, rows, tones) => `
+      <div class="table-wrap"><table>
+        <thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+        <tbody>${rows.map((row, i) => {
+          const tone = tones && tones[i];
+          return `<tr>${row.map((cell, j) =>
+            `<td>${j === 0 && tone ? `<span class="dot ${tone}"></span>` : ""}${esc(cell)}</td>`
+          ).join("")}</tr>`;
+        }).join("")}</tbody>
+      </table></div>`;
+
+    const pages = {
+      overview: `
+        <div class="stack">
+          ${callout("info", "Core thesis for the presentation",
+            "The project is a privacy proxy between a webpage and a reasoning model. It extracts the strongest available local evidence, replaces identity-bearing values with stable placeholders, optionally sanitizes visible pixels, and permits only validated actions to return.")}
+          <div class="grid g2">
+            <div>
+              <h2>What the system actually is</h2>
+              ${bullets([
+                "A Chrome Manifest V3 extension with four runtime contexts: popup, event-driven service worker, isolated content script, and offscreen inference document.",
+                "A local privacy stack combining browser-declared DOM facts, checksum/format validators, English NER, face detection, OCR, and deterministic screenshot masking.",
+                "An optional local Express gateway that invokes either a deterministic mock or any OpenAI-compatible LLM/VLM endpoint.",
+                "A bounded multi-turn browser agent: fresh extract → redact → plan → validate → apply → repeat."
+              ])}
+            </div>
+            <div class="card">
+              <h4>Repository-backed snapshot</h4>
+              <div class="body">
+                <div class="stats">
+                  <div class="stat"><b>0.7.0</b><small>Extension version</small></div>
+                  <div class="stat"><b>4</b><small>Browser runtime contexts</small></div>
+                  <div class="stat"><b>6</b><small>Maximum agent turns</small></div>
+                  <div class="stat"><b>90 s</b><small>Total runtime bound</small></div>
+                </div>
+                <hr>
+                <p class="muted" style="font-size:12px">Current baseline: 16 synthetic pages, 46 true positives, 0 false positives, 10 misses. All scored misses are person names because the deterministic harness does not load NER.</p>
+              </div>
+            </div>
+          </div>
+          <h2>Most important differentiators</h2>
+          <div class="grid g3">
+            ${node("Evidence-aware detection", "Keyword, structure, checksum, and model confidence remain distinguishable.", true)}
+            ${node("Capability-based privacy", "Credentials are one-way tokens; no recoverable secret is created.")}
+            ${node("Constrained agency", "The model cannot emit code, selectors, URLs, or unknown actions.")}
+          </div>
+          ${callout("warning", "Do not overstate the prototype",
+            "Rule-based metrics are strong on a small synthetic corpus, but there is no labeled face/OCR benchmark. Hybrid agent mode performs local vision without giving those detections to the planner. Firefox, multilingual NER, shadow DOM, and complete anti-leak detection are not delivered.")}
+        </div>`,
+
+      architecture: `
+        <div class="stack">
+          <h2>Runtime architecture</h2>
+          <p class="muted">Chrome's security model dictates the decomposition: the popup cannot read the page, the service worker cannot safely host long-running inference, and only the content script can both inspect the live DOM and keep a tab-local vault.</p>
+          <div class="flow flow-4">
+            ${node("Popup", "User intent, policy controls, consent, previews, status, timing")}
+            ${arrow()}
+            ${node("Service worker", "Injection, capture, routing, agent loop, network egress")}
+            ${arrow()}
+            ${node("Content script", "Raw DOM, redaction, vault, placeholder expansion, actions", true)}
+            ${arrow()}
+            ${node("Page DOM", "Untrusted webpage state and browser controls")}
+          </div>
+          <div class="flow flow-3">
+            ${node("Offscreen document", "YuNet + Tesseract + DistilBERT through local WASM")}
+            ${arrow()}
+            ${node("Local Express gateway", "Validates payload; mock or OpenAI-compatible provider")}
+            ${arrow()}
+            ${node("Optional model endpoint", "Self-hosted Ollama/vLLM/LM Studio or cloud provider")}
+          </div>
+          <h3>Responsibilities and boundaries</h3>
+          ${table(["Component", "Can see", "Must not own", "Primary files"], [
+            ["Popup", "Redacted snapshot, safe metadata, sanitized preview", "Vault, raw OCR, raw DOM", "src/popup/*"],
+            ["Service worker", "Redacted payload, local screenshot while routing, validated actions", "Persistent secrets or raw snapshot storage", "src/background/serviceWorker.js"],
+            ["Content script", "Live DOM, temporary raw values, vault", "Network credentials or provider logic", "src/content/*, src/agent/apply.js"],
+            ["Offscreen document", "Rule-redacted NER text, in-memory screenshot", "Vault or direct remote provider calls", "src/offscreen/*, src/nlp/*, src/vision/*"],
+            ["Agent server", "Sanitized goal/context and optional sanitized JPEG", "Vault, raw image, arbitrary browser control", "server/*"]
+          ])}
+          <h3>Build and deployment shape</h3>
+          ${bullets([
+            "Vanilla classic scripts are injected into the tab in dependency order; schema.js is documentation-only.",
+            "The offscreen host is bundled by esbuild because it imports npm modules and local inference engines.",
+            "ONNX Runtime and Tesseract worker/core files are copied under vendor; YuNet and English OCR data are downloaded at build time unless CI skips model downloads.",
+            "DistilBERT weights are not packaged: they download lazily from Hugging Face and use browser cache.",
+            "The default server binds loopback port 4317 and uses the deterministic mock provider."
+          ])}
+        </div>`,
+
+      pipeline: `
+        <div class="stack">
+          <h2>Three user-visible pipelines</h2>
+          ${table(["Command", "Local stages", "Network", "Output"], [
+            ["Analyze current page", "DOM → rules/checksums → optional NER → placeholders", "None", "Redacted semantic snapshot"],
+            ["Analyze current screen", "Viewport DOM + NER → capture → YuNet → selective OCR → sanitizer", "None", "Detections and sanitized preview"],
+            ["Run agent", "Fresh redaction each turn → optional vision → leak gates → plan → validate → apply", "Sanitized payload only", "Bounded browser actions"]
+          ], ["success", "success", "info"])}
+          <h3>One complete agent turn</h3>
+          <div class="grid g4">
+            ${node("1. Extract", "Collect visible or viewport DOM, accessible names, state, stable element_N ids.")}
+            ${node("2. Detect", "Field purpose + identifier values + control-value classification.")}
+            ${node("3. Rule-redact", "Replace structured values and create the tab-local minter/vault.", true)}
+            ${node("4. Local NER", "Send only rule-redacted text; receive PER spans; reuse the same minter.")}
+            ${node("5. Sanitize goal", "Replace any vault value or newly detected identifier in user instructions.")}
+            ${node("6. Optional pixels", "Capture visible tab; run YuNet/OCR; render padded irreversible masks.")}
+            ${node("7. Verify egress", "Require branded context/image, reject raw fields and exact/reformatted vault leaks.", true)}
+            ${node("8. Plan remotely", "Server model returns JSON in a closed action vocabulary.")}
+            ${node("9. Validate twice", "Server and extension reject unknown keys, ids, credentials, and excessive bounds.")}
+            ${node("10. Confirm risk", "Submit, send, purchase, delete, transfer, and continue need opt-in.")}
+            ${node("11. Apply locally", "Expand approved placeholders from the vault only inside the content script.", true)}
+            ${node("12. Refresh", "Wait for page stability, re-extract, stop on done, repetition, six turns, or 90 seconds.")}
+          </div>
+          ${callout("warning", "Hybrid-mode nuance",
+            "In the current implementation, Hybrid mode captures and sanitizes pixels locally and merges privacy counts, but it does not attach the screenshot to the LLM request. Nor are face/OCR detections converted into semantic planner context. Sanitized-image mode is the only mode that gives pixels to the provider.")}
+        </div>`,
+
+      models: `
+        <div class="stack">
+          <h2>Model and rule inventory</h2>
+          <p class="muted">“Model” means different things in this project. The PPT should distinguish deterministic validators, perceptual models, and the reasoning model because they solve different uncertainty classes.</p>
+          ${table(["Component", "Technology", "When used", "What it handles", "Why this method"], modelRows)}
+          <h3>DistilBERT NER details</h3>
+          ${bullets([
+            "Model: onnx-community/distilbert-NER-ONNX, q8, WASM-only, one thread.",
+            "Only CoNLL-03 PER maps to person_name. LOC is deliberately not mapped to address; a place name is not a postal address.",
+            "Grouped minimum confidence is 0.90 to bias toward precision and avoid obvious over-redaction.",
+            "Text is conservatively chunked at 1,200 characters with 160-character overlap; short fields are packed together.",
+            "An inference failure degrades to rule-only output and reports the failure instead of failing the whole analysis."
+          ])}
+          <h3>YuNet details</h3>
+          ${bullets([
+            "Input is letterboxed into 640×640; ONNX outputs at strides 8, 16, and 32 are decoded locally.",
+            "Score threshold is 0.45 and non-maximum suppression threshold is 0.30.",
+            "Large captures run a full-frame pass first; only a miss triggers overlapping 1,280-pixel region passes.",
+            "It detects face rectangles, not identity, body, document type, or whether the person is the user."
+          ])}
+          <h3>Why rules remain central</h3>
+          <p>The architecture treats browser-declared facts and check digits as authoritative evidence. A neural classifier for type=password or a Luhn-valid card would be slower, larger, and less explainable. Learned models enter only where syntax and DOM semantics cannot answer the question: names in prose, faces in pixels, and text painted into images.</p>
+        </div>`,
+
+      evolution: `
+        <div class="stack">
+          <h2>Model and architecture evolution</h2>
+          ${callout("info", "Selection criterion", "Changes were driven by task fit, extension download size, browser runtime behavior, and redaction usability—not by benchmark prestige.")}
+          ${callout("warning", "History and provenance caveat", "Git contains only three commits. The initial README is commit 9ef67d5; the version 0.2 DOM/YOLOS prototype is 8dfc84d; the version 0.5 validators/evaluation/redaction pivot is 82c7e84. Most current version 0.7 capabilities—including DistilBERT, YuNet, the server, agent loop, CI, and newer tests—exist only in the present uncommitted working tree. The PPT should describe them as the current prototype, not as a sequence of released versions.")}
+          ${table(["Change", "What failed", "Why the replacement fit", "Current status"], migrationRows)}
+          <h3>Chronological story for speaking</h3>
+          ${bullets([
+            "Phase 1 began DOM-first because forms, controls, accessible names, visibility, and element targets are native browser facts.",
+            "Phase 2 added YOLOS-Tiny as a feasibility benchmark for in-browser object detection, explicitly not as a privacy detector.",
+            "Structured identifier gaps led to checksum and format validators before any larger model work.",
+            "The evaluation harness exposed false positives from address word senses, misleading HTML ids, and mismatched scan/serialization strings.",
+            "The safe-snapshot phase moved the product from a PII highlighter to a privacy proxy with placeholders and a local vault.",
+            "NER was introduced only for unstructured person names. BERT-base was replaced when real extension download and inference behavior proved impractical.",
+            "Face detection moved from generic person detection through BlazeFace experiments to YuNet after small ID portraits exposed task mismatch.",
+            "Finally, a gateway, sanitizer, strict action protocol, mock provider, and E2E task connected local privacy to remote planning."
+          ])}
+          <h3>Rejected or deferred choices</h3>
+          ${table(["Candidate", "Why not current production"], [
+            ["YOLOv10 adapter", "Stub only; no model packaging, post-processing, measurements, or privacy-specific training."],
+            ["Multilingual DistilBERT hrl", "Despite its name, the documented candidate does not include Hindi."],
+            ["AI4Bharat IndicNER", "Best relevance, but no ready ONNX checkpoint; conversion, quantization, size, and latency remain unmeasured."],
+            ["LOC → address mapping", "Would redact ordinary locations such as Bengaluru and Whitefield as if they were personal postal addresses."],
+            ["Always-on OCR", "Unnecessary CPU/latency on normal HTML pages; selective OCR uses DOM evidence first."],
+            ["Model inside service worker", "MV3 worker lifecycle is unsuitable for canvas/WASM model hosting and can be suspended."]
+          ])}
+        </div>`,
+
+      privacy: `
+        <div class="stack">
+          <h2>Privacy architecture and trust model</h2>
+          <div class="grid g3" style="grid-template-columns:1fr 1fr">
+            <div>
+              <h3>Agent context</h3>
+              ${bullets([
+                "Deep-copied, redacted snapshot marked redacted: true.",
+                "Stable typed tokens such as <AADHAAR_1>, <EMAIL_2>, and <NAME_1>.",
+                "Compact page/element structure that the model may receive.",
+                "Redaction counts and value-free sensitivity evidence."
+              ])}
+            </div>
+            <div>
+              <h3>Session vault</h3>
+              ${bullets([
+                "Placeholder-to-original map stored only in the tab's isolated content world.",
+                "Never serialized, persisted, logged, returned to popup, or accepted by server validation.",
+                "Used locally to fill approved values after the model returns placeholders.",
+                "Contains no password, OTP, CVV, auth secret, or truncation token value."
+              ])}
+            </div>
+          </div>
+          <h3>Mechanical privacy gates</h3>
+          ${table(["Gate", "Condition", "Failure behavior"], [
+            ["Content redaction", "Snapshot must be transformed before leaving the content script", "No outbound payload is created"],
+            ["Goal redaction", "Vault values and detectable identifiers in user goal become placeholders", "Protected values stay local"],
+            ["History scan", "Serialized prior actions/results must not contain protected values", "Turn is refused"],
+            ["Exact + normalized leak scan", "Detect literal and punctuation-reformatted vault values", "Payload is refused"],
+            ["Forbidden-field scan", "Reject vault, original, rawScreenshot, rawOcr, imageDataUrl keys recursively", "Network call is refused"],
+            ["Sanitized image brand", "Requires sanitized-screenshot-v1 JPEG with dimensions and bounded size", "Image mode is refused"],
+            ["Server request validation", "Only known top-level fields and sanitizer-marked context", "HTTP 400"],
+            ["Action validation", "Only known ids/actions/fields and bounded values", "Plan is rejected before application"]
+          ])}
+          <h3>Threat coverage</h3>
+          ${bullets([
+            "Malicious webpage: page text is data, not instructions; model output cannot introduce code or selectors.",
+            "Malicious or confused model: strict JSON, allowlisted fields, current ids, action bounds, and local revalidation.",
+            "Accidental PII egress: local placeholders, one-way credentials, screenshot masks, and duplicate structural gates.",
+            "Stale DOM: fresh snapshot each turn; missing element_N targets fail closed.",
+            "Provider risk: sanitized content can still be retained by a cloud provider; self-hosted or mock mode gives a stronger boundary."
+          ])}
+          ${callout("warning", "Honest privacy claim",
+            "The design reduces exposure; it does not guarantee anonymity or zero leakage. Any category the detector misses may remain in text or pixels. The correct claim is “sanitized by locally enforced, tested rules before transmission,” not “all personal information is impossible to leak.”")}
+        </div>`,
+
+      agent: `
+        <div class="stack">
+          <h2>Agent planning and server architecture</h2>
+          <div class="grid g3" style="grid-template-columns:1fr 1fr">
+            <div class="card"><h4>Extension-side controller</h4><div class="body">${bullets([
+              "Requires non-empty goal and explicit remoteConfirmed flag.",
+              "Limits plans to 8 actions, 6 turns, 90 seconds, 5-second waits, and 1,600-pixel scrolls.",
+              "Stops after repeated identical no-progress plans.",
+              "Separates wait/done orchestration from batched DOM actions.",
+              "Aborts an active network request when the user presses Stop."
+            ])}</div></div>
+            <div class="card"><h4>Express privacy gateway</h4><div class="body">${bullets([
+              "Binds 127.0.0.1:4317 and exposes /health, /agent, and local demo assets.",
+              "Applies body limits, CORS checks, request validation, provider timeout, and response validation.",
+              "Keeps AGENT_API_KEY and provider endpoint out of extension code.",
+              "Supports mock and OpenAI-compatible providers with configurable model and image use.",
+              "Revalidates returned actions against the received sanitized context."
+            ])}</div></div>
+          </div>
+          <h3>Closed action protocol</h3>
+          ${table(["Action", "Allowed data", "Important restriction"], [
+            ["click", "Current element_N", "Destructive-looking labels may require user approval"],
+            ["fill", "Current element_N + literal/approved placeholders", "Credential fields and one-way placeholders rejected"],
+            ["select", "Current select id + option text", "Must match an existing option locally"],
+            ["check / uncheck", "Current checkbox/radio id", "Wrong target type fails"],
+            ["press", "Enter, Tab, Escape, or Space", "No arbitrary keyboard sequence"],
+            ["scroll", "Bounded x/y delta", "Nonzero and maximum 1,600 pixels per axis"],
+            ["wait", "0–5,000 ms", "Executed by worker, not arbitrary script"],
+            ["done", "Short reason", "Terminates loop"]
+          ])}
+          <h3>Provider modes</h3>
+          ${bullets([
+            "Mock: deterministic, offline, no API key, used by server tests and SIH E2E demonstration.",
+            "OpenAI-compatible local: point AGENT_ENDPOINT to Ollama, vLLM, or LM Studio and choose an available model.",
+            "Cloud: same protocol with HTTPS endpoint and key; only sanitized data is intended to leave the machine.",
+            "Text planning: redacted DOM context is sufficient for conventional forms.",
+            "Multimodal planning: Sanitized-image mode adds a low-detail sanitizer-branded JPEG."
+          ])}
+        </div>`,
+
+      evaluation: `
+        <div class="stack">
+          <h2>Evaluation and evidence</h2>
+          <div class="stats">
+            <div class="stat"><b>16</b><small>Synthetic corpus pages</small></div>
+            <div class="stat"><b class="ok">46</b><small>Rule-layer true positives</small></div>
+            <div class="stat"><b class="ok">0</b><small>Known false positives</small></div>
+            <div class="stat"><b class="warn-fg">10</b><small>Rule-layer misses</small></div>
+            <div class="stat"><b>90.2%</b><small>Overall rule-layer F1</small></div>
+          </div>
+          <p class="muted">Baseline file recorded 2026-09-03: precision 100%, recall 82.14%, F1 90.2%. Every miss is a person name: six English and four Devanagari. The harness intentionally excludes real NER, YuNet, and OCR.</p>
+          <h3>What each test family proves</h3>
+          ${table(["Command", "Evidence provided", "What it does not prove"], [
+            ["npm run eval", "DOM extraction, category signals, validators, redaction contract, NER plumbing with synthetic spans", "Real layout, NER model quality, face/OCR accuracy"],
+            ["npm run test:safety", "Leak gates, malformed output, action bounds, credential refusal, safe detection metadata", "Full extension integration or model accuracy"],
+            ["npm run test:server", "Request/CORS validation, mock actions, credential avoidance, sanitized-image requirement", "Cloud provider behavior"],
+            ["npm run test:e2e", "Real unpacked extension, real YuNet/OCR path, branded image, mock agent completion, password remains empty", "Statistical vision/OCR accuracy"],
+            ["GitHub Actions", "Build, syntax checks, eval, safety/server tests, fast Chromium integration", "Full model downloads in standard CI"]
+          ])}
+          <h3>Why the evaluation design is good</h3>
+          ${bullets([
+            "The injected script list is parsed from the service worker, reducing test/runtime drift.",
+            "Synthetic values avoid committing real personal information while still exercising valid checksums.",
+            "HTML ids are neutral so the classifier cannot cheat by reading category names from test ids.",
+            "Known gaps are represented as labeled misses, giving future models measurable headroom.",
+            "Rule-layer metrics are kept separate from browser model execution rather than blending incomparable evidence."
+          ])}
+          ${callout("warning", "Measurement gaps before making competition claims",
+            "Build a labeled pixel corpus for face precision/recall, OCR-derived identifier F1, box IoU, sensitive-pixel coverage, and over-redaction. Add browser performance measurements across representative low/mid/high-end systems. Current timing fields are instrumentation, not a benchmark report.")}
+          ${callout("neutral", "Evidence status of this review",
+            "Test definitions and recorded baseline files were inspected, but no fresh test run is claimed. The local command sandbox was unavailable in this Windows session. Also correct the README phrase “recall in the high 80s”: the current baseline records 82.14% after adding four Devanagari person-name misses.")}
+        </div>`,
+
+      decisions: `
+        <div class="stack">
+          <h2>Architecture decision record</h2>
+          ${table(["Decision", "Implementation", "Reason"], decisionRows)}
+          <h3>Quality attributes prioritized</h3>
+          <div class="grid g3">
+            ${node("Privacy first", "Reduce raw-data movement and make unsafe states mechanically unrepresentable.", true)}
+            ${node("Explainability", "Carry source and confidence: keyword, shape, structure, checksum, or model.")}
+            ${node("Browser feasibility", "Lazy loading, WASM, one thread, selective OCR, compact face weights.")}
+            ${node("Fail closed", "Unknown fields, targets, placeholders, raw keys, and credentials are rejected.")}
+            ${node("Reproducibility", "Mock provider, synthetic corpus, retained YOLOS baseline, CI without large downloads.")}
+            ${node("Swappability", "VisionEngine/ModelAdapter and NerEngine/NerAdapter isolate checkpoint choices.")}
+          </div>
+        </div>`,
+
+      limits: `
+        <div class="stack">
+          <h2>Current limitations, risks, and recommended priorities</h2>
+          ${table(["Risk", "Technical consequence", "Priority"], risks.map((r) => [r[0], r[1], r[2]]), risks.map((r) => r[3]))}
+          <h3>Recommended next work, in order</h3>
+          ${bullets([
+            "Fix the popup undeclared-variable defect and run the complete test suite on a clean working tree.",
+            "Define Hybrid mode precisely: either send normalized visual observations as structured planner context or skip expensive vision when it cannot influence the plan.",
+            "Build a labeled face/OCR/redaction pixel benchmark; report coverage and over-redaction, not only integration success.",
+            "Convert and quantize an Indic NER candidate, then compare download size, latency, English/Indic recall, and false-positive redaction.",
+            "Add contextual bank-account candidate handling and broaden the synthetic corpus with independent labeling.",
+            "Improve DOM reach with open shadow-root traversal and visual occlusion checks.",
+            "Strengthen destructive-action policy beyond English label regexes.",
+            "Clean generated/vendor tracking rules, resolve duplicate-looking paths, and make a reproducible release bundle."
+          ])}
+          ${callout("neutral", "Scope discipline",
+            "Do not add a larger universal vision-language model to the extension simply to claim more AI. The current strength is using deterministic browser evidence locally and reserving server intelligence for planning. Add models only when a labeled gap proves they improve privacy or task completion within resource limits.")}
+        </div>`,
+
+      ppt: `
+        <div class="stack">
+          <h2>PPT-ready slide blueprint</h2>
+          <p class="muted">Suggested 18-slide narrative. Each slide has one message; use architecture visuals and concrete evidence instead of copying dense source-code tables.</p>
+          ${table(["Slide", "Title", "Primary message / content"], [
+            ["1", "Privacy-Preserving Browser Agent", "One-line value proposition: local privacy intelligence, remote reasoning, locally controlled action."],
+            ["2", "Problem and SIH motivation", "Browser agents need screen context, but raw screens contain credentials, identifiers, faces, and personal workflow data."],
+            ["3", "Design thesis", "Use the cheapest reliable local evidence first; transmit only sanitized, minimally necessary context."],
+            ["4", "System at a glance", "Popup → worker → content script/page; worker ↔ offscreen models; worker → local gateway → optional provider."],
+            ["5", "Why four browser contexts", "Explain Chrome security and lifecycle constraints that shaped each responsibility."],
+            ["6", "DOM-first perception", "Accessible semantics, visibility modes, stable element ids, and why DOM beats vision for ordinary controls."],
+            ["7", "Layered PII detection", "Declared facts, exact validators/checksums, then learned NER/vision/OCR only where necessary."],
+            ["8", "Structured identifier intelligence", "Aadhaar/Verhoeff, cards/Luhn, GSTIN/mod-36, PAN/IFSC structures; strongest-first overlap handling."],
+            ["9", "Safe snapshot and vault", "One value → one placeholder; tab-local mapping; one-way credential tokens."],
+            ["10", "Local model stack", "DistilBERT NER, YuNet face detection, selective Tesseract OCR, ONNX/WASM offscreen runtime."],
+            ["11", "Why the models changed", "YOLOS → BlazeFace experiments → YuNet; BERT-base → DistilBERT; show task-fit and size/latency evidence."],
+            ["12", "Screenshot sanitization", "Coordinate normalization, padded masks, black-box high-risk data, branded JPEG, value-free privacy manifest."],
+            ["13", "Network privacy gates", "Redacted flag, leak scanning, raw-field denylist, branded image, payload limit, server mirror validation."],
+            ["14", "Constrained browser agent", "Closed action schema, current ids, local placeholder expansion, credential refusal, confirmations, turn/runtime limits."],
+            ["15", "Server and provider flexibility", "Mock offline demo plus OpenAI-compatible local/cloud deployment; API keys server-side."],
+            ["16", "Evaluation evidence", "16-page rule baseline: 46 TP, 0 FP, 10 FN, 90.2% F1; separate safety/server/E2E evidence."],
+            ["17", "Honest limitations", "English NER, no labeled pixel benchmark, Hybrid mismatch, DOM blind spots, provider retention, Chrome-only."],
+            ["18", "Roadmap and conclusion", "Indic NER, pixel benchmark, structured visual context, stronger DOM reach; close with privacy proxy thesis."]
+          ])}
+          <h3>Speaker-ready claims</h3>
+          ${bullets([
+            "We do not use a model where the browser or a checksum already provides stronger evidence.",
+            "The raw value and the model-visible reference are separate capabilities; credentials intentionally have no reverse capability.",
+            "A remote model can propose actions, but it cannot expand its own authority.",
+            "The service does not trust a boolean label alone: the extension and server mechanically validate payload shape and action shape.",
+            "Our current 90.2% F1 is for deterministic DOM/value detection on a synthetic regression corpus, not total system accuracy.",
+            "Model swaps were engineering decisions: purpose alignment, extension size, inference passes, browser backend behavior, and redaction geometry."
+          ])}
+          <h3>Suggested diagrams to draw</h3>
+          ${bullets([
+            "Trust-boundary diagram with the vault highlighted only inside the content script.",
+            "Funnel diagram: raw DOM/pixels → local detection → placeholders/masks → compact payload → planner.",
+            "Model evolution timeline with failure evidence under each transition.",
+            "Sequence diagram for one agent turn, ending with local placeholder expansion.",
+            "Evaluation matrix separating rule accuracy, safety properties, server behavior, and real-model integration."
+          ])}
+        </div>`
+    };
+
+    const nav = document.getElementById("nav");
+    const main = document.getElementById("main");
+    let active = "overview";
+
+    function render() {
+      nav.innerHTML = sections.map(([id, label]) =>
+        `<button class="pill${id === active ? " active" : ""}" data-id="${id}">${label}</button>`
+      ).join("");
+      main.innerHTML = pages[active];
+    }
+
+    nav.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-id]");
+      if (!button) return;
+      active = button.dataset.id;
+      render();
+      window.scrollTo(0, 0);
+    });
+
+    render();
+  </script>
+</body>
+</html>

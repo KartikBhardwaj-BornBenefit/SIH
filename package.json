@@ -1,19 +1,33 @@
 {
   "name": "privacy-preserving-browser-agent",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "private": true,
-  "description": "Local-only Chrome extension: DOM extraction plus a swappable on-device vision baseline.",
+  "description": "Chrome extension: on-device redaction, then a redacted round-trip to a server model that returns page actions.",
+  "//type": "Declared so Node reads the ESM layers (src/vision, src/nlp) as modules, which lets the eval harness import and test them directly. Content scripts are plain classic scripts loaded via <script>, never through Node's module loader, so this does not affect them.",
+  "type": "module",
   "scripts": {
     "build": "node scripts/build-vision.mjs",
     "postinstall": "node scripts/build-vision.mjs",
-    "eval": "node eval/run.mjs"
+    "eval": "node eval/run.mjs",
+    "lint": "node --check src/background/serviceWorker.js && node --check src/popup/popup.js && node --check src/agent/protocol.js && node --check src/privacy/sanitizer.js && node --check server/index.mjs",
+    "server": "node server/index.mjs",
+    "test:server": "node --test test/server.test.mjs",
+    "test:safety": "node --test test/safety.test.mjs",
+    "test:e2e": "node --test test/extension.e2e.test.mjs",
+    "test": "npm run eval && npm run test:safety && npm run test:server"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.5.2",
+    "express": "^5.1.0",
+    "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
     "tesseract.js": "^6.0.1"
   },
   "devDependencies": {
     "esbuild": "^0.25.9",
-    "jsdom": "^27.0.0"
+    "jsdom": "^27.0.0",
+    "playwright-core": "^1.55.0"
+  },
+  "overrides": {
+    "sharp": "^0.35.4"
   }
 }

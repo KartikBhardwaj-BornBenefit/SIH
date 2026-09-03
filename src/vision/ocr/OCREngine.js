@@ -37,16 +37,36 @@ export class TesseractAdapter {
       await this.load();
     }
     var start = performance.now();
-    var result = await this.worker.recognize(image);
+    // Tesseract.js 6 emits only plain text unless structured output is
+    // explicitly requested. Blocks contain the line boxes needed to redact
+    // pixels and keep spaced identifiers such as "8565 2583 5787" together.
+    var result = await this.worker.recognize(
+      image,
+      {},
+      { text: true, blocks: true }
+    );
     var inferenceTimeMs = Math.round(performance.now() - start);
     var data = result && result.data ? result.data : {};
-    var words = Array.isArray(data.words) ? data.words : [];
-    var items = words
-      .map(function (word) {
-        var box = word.bbox || {};
+    var lines = [];
+    if (Array.isArray(data.blocks)) {
+      data.blocks.forEach(function (block) {
+        (block.paragraphs || []).forEach(function (paragraph) {
+          (paragraph.lines || []).forEach(function (line) {
+            lines.push(line);
+          });
+        });
+      });
+    }
+    // Compatibility with Tesseract.js 5 output if the runtime is downgraded.
+    if (!lines.length && Array.isArray(data.words)) {
+      lines = data.words;
+    }
+    var items = lines
+      .map(function (line) {
+        var box = line.bbox || {};
         return {
-          text: word.text || "",
-          confidence: typeof word.confidence === "number" ? word.confidence / 100 : 0,
+          text: line.text || "",
+          confidence: typeof line.confidence === "number" ? line.confidence / 100 : 0,
           boundingBox: {
             x: Math.round(box.x0 || 0),
             y: Math.round(box.y0 || 0),

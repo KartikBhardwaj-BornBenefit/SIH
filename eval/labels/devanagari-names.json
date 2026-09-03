@@ -1,0 +1,9 @@
+{
+  "note": "The measured cost of choosing an English checkpoint. Phase 6 ships Xenova/bert-base-NER because it needs no ONNX conversion, and the honest consequence is that it cannot read these names at all: it is CoNLL-03 trained on English newswire and has never seen Devanagari. Every entry here is expected to miss both before and after Phase 6, which is exactly why the page exists — a gap that shows up as a number can justify the cost of converting an Indic model, whereas a gap recorded in a comment gets forgotten. The Devanagari keyword work in Phase 8 does not help here: keywords match field labels, and these are names in prose. The dn-d* distractors carry no expectation and mirror the English page's — a city, a statute and a river.",
+  "expect": {
+    "dn-1": ["person_name/value"],
+    "dn-2": ["person_name/value"],
+    "dn-3": ["person_name/value"],
+    "dn-4": ["person_name/value"]
+  }
+}

@@ -1,12 +1,12 @@
 /**
- * Facade over a ModelAdapter. The rest of the extension talks only to this.
+ * Facade over a NerAdapter. The rest of the extension talks only to this.
  *
  * Usage:
- *   const engine = new VisionEngine(new YolosTinyAdapter());
+ *   const engine = new NerEngine(new BertBaseNerAdapter());
  *   await engine.init();
- *   const result = await engine.analyze(imageDataUrl, { width, height });
+ *   const result = await engine.analyze([{ key: "el:4:text", text: "..." }]);
  */
-export class VisionEngine {
+export class NerEngine {
   constructor(adapter) {
     this.adapter = adapter;
     this.status = "idle";
@@ -23,15 +23,12 @@ export class VisionEngine {
       modelId: this.adapter && this.adapter.modelId,
       adapterId: this.adapter && this.adapter.id,
       loadTimeMs: this.adapter && this.adapter.loadTimeMs,
-      note:
-        this.adapter && this.adapter.id === "yolos-tiny"
-          ? "YOLOS-Tiny is retained as the reproducible Phase 2 benchmark."
-          : "Compact local YuNet face detection; screenshots never leave the extension."
+      note: "English DistilBERT, WASM q8. It cannot read Devanagari names."
     };
   }
 
   async init(preferredDevice) {
-    if (this.status === "ready" && this.adapter && this.adapter.detector) {
+    if (this.status === "ready" && this.adapter && this.adapter.tagger) {
       return this.getStatus();
     }
     this.status = "loading";
@@ -47,28 +44,23 @@ export class VisionEngine {
     }
   }
 
-  async analyze(image, meta) {
+  async analyze(texts) {
     if (this.status !== "ready") {
-      throw new Error("Vision engine is not ready. Status: " + this.status);
+      throw new Error("NER engine is not ready. Status: " + this.status);
     }
     var started = performance.now();
-    var result = await this.adapter.analyze(image);
-    var totalProcessingTimeMs = Math.round(performance.now() - started);
+    var result = await this.adapter.analyze(texts);
     return {
-      detections: result.detections || [],
+      results: result.results || [],
       inferenceTimeMs: result.inferenceTimeMs,
-      totalProcessingTimeMs: totalProcessingTimeMs,
+      totalProcessingTimeMs: Math.round(performance.now() - started),
       modelLoadTimeMs: this.adapter.loadTimeMs,
       model: result.model,
       modelId: result.modelId,
       backend: result.backend,
       adapterId: result.adapterId,
-      image: {
-        width: meta && meta.width,
-        height: meta && meta.height
-      },
-      capturedAt: new Date().toISOString(),
-      screenshotLeftDevice: false
+      textsScanned: (texts || []).length,
+      textLeftDevice: false
     };
   }
 }

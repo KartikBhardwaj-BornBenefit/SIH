@@ -18,36 +18,14 @@ var viewJson = document.getElementById("view-json");
 var copyJson = document.getElementById("copy-json");
 var copyLabel = document.getElementById("copy-label");
 var contextModeEl = document.getElementById("context-mode");
-var revealToggle = document.getElementById("reveal-values");
-var vaultPanelEl = document.getElementById("vault-panel");
-var vaultListEl = document.getElementById("vault-list");
-var vaultNoteEl = document.getElementById("vault-note");
 
 var latestSnapshot = null;
 var latestRedaction = null;
-
-/**
- * Placeholder to original value, for the page as last analyzed.
- *
- * Held in this variable and nowhere else. The popup is destroyed whenever it
- * loses focus, which takes this with it — there is no storage write, no
- * logging, and no path from here into anything the user can copy. It exists
- * only so the "Reveal" control can prove the redaction was correct.
- */
-var sessionVault = null;
+var latestNer = null;
 
 function clearVault() {
-  sessionVault = null;
   latestRedaction = null;
-  if (revealToggle) {
-    revealToggle.checked = false;
-  }
-  if (vaultListEl) {
-    vaultListEl.textContent = "";
-  }
-  if (vaultPanelEl) {
-    vaultPanelEl.hidden = true;
-  }
+  latestNer = null;
 }
 
 function setStatus(message, isError) {
@@ -98,7 +76,13 @@ function signalLabel(signal) {
     return signal.category + " asks";
   }
   var where = signal.via === "control-value" ? " in value" : " found";
-  return signal.category + where + (signal.confidence === "checksum" ? " ✓" : "");
+  var extra = "";
+  if (signal.confidence === "checksum") {
+    extra = " ✓";
+  } else if (signal.confidence === "model") {
+    extra = " (model)";
+  }
+  return signal.category + where + extra;
 }
 
 function signalSummary(element) {
@@ -209,56 +193,28 @@ function showJson() {
   viewJson.setAttribute("aria-selected", "true");
 }
 
-/**
- * Render the placeholder-to-value mapping so the user can confirm the right
- * things were redacted. This list is display-only; it is never part of the
- * JSON view and never reachable from Copy JSON.
- */
-function renderVault() {
-  if (!vaultPanelEl) {
-    return;
-  }
-  if (!revealToggle || !revealToggle.checked || !sessionVault) {
-    vaultPanelEl.hidden = true;
-    return;
-  }
-
-  vaultListEl.textContent = "";
-  var placeholders = Object.keys(sessionVault);
-  placeholders.forEach(function (placeholder) {
-    var row = node("div", "vault-row");
-    row.appendChild(node("code", "vault-key", placeholder));
-    row.appendChild(node("span", "vault-value", sessionVault[placeholder]));
-    vaultListEl.appendChild(row);
-  });
-
-  var oneWay = ((latestRedaction && latestRedaction.records) || []).filter(function (record) {
-    return record.oneWay;
-  });
-  var parts = [placeholders.length + " recoverable"];
-  if (oneWay.length) {
-    parts.push(oneWay.length + " one-way (credentials are never recoverable)");
-  }
-  if (!placeholders.length && !oneWay.length) {
-    parts = ["Nothing was redacted on this page."];
-  }
-  vaultNoteEl.textContent = parts.join(" · ");
-  vaultPanelEl.hidden = false;
-}
-
-function renderRedactionStats(snapshot) {
+function renderRedactionStats(snapshot, ner) {
   var counts = (snapshot && snapshot.redactionCounts) || {};
   var replacedEl = document.getElementById("stat-redacted");
   if (replacedEl) {
     replacedEl.textContent = String(counts.replacements || 0);
+  }
+  var nerEl = document.getElementById("stat-ner");
+  if (nerEl) {
+    var modelHits = (counts.byConfidence && counts.byConfidence.model) || 0;
+    if (!modelHits && ner && ner.ok) {
+      modelHits = ner.entities || 0;
+    }
+    nerEl.textContent = String(modelHits);
   }
   if (revealToggle) {
     revealToggle.disabled = !sessionVault || !Object.keys(sessionVault).length;
   }
 }
 
-function renderSnapshot(snapshot) {
+function renderSnapshot(snapshot, ner) {
   latestSnapshot = snapshot;
+  latestNer = ner || null;
   document.getElementById("count-elements").textContent = String(snapshot.counts.elements);
   document.getElementById("count-interactive").textContent = String(snapshot.counts.interactive);
   document.getElementById("count-sensitive").textContent = String(
@@ -276,8 +232,8 @@ function renderSnapshot(snapshot) {
   document.getElementById("stat-checksum").textContent = String(
     snapshot.counts.checksumVerified || 0
   );
-  renderRedactionStats(snapshot);
-  renderVault();
+  renderRedactionStats(snapshot, ner);
+  updateNerStatus(ner);
   pageTitleEl.textContent = snapshot.page.title || "(untitled)";
   pageUrlEl.textContent = snapshot.page.url || "";
   pageFlagsEl.textContent =
@@ -300,7 +256,7 @@ function analyzeCurrentPage() {
   }
 
   setLoading(true);
-  setStatus("Reading the current tab…");
+  setStatus("Reading the current tab. First time: downloading a 66 MB English name model (progress shows above).");
   resultsEl.hidden = true;
   emptyEl.hidden = true;
   clearVault();
@@ -325,16 +281,28 @@ function analyzeCurrentPage() {
         return;
       }
 
-      sessionVault = response.vault || null;
       latestRedaction = response.redaction || null;
 
       var replaced = (latestRedaction && latestRedaction.counts.replacements) || 0;
+      var ner = response.ner || null;
+      var statusBits = [];
+      if (replaced) {
+        statusBits.push(replaced + " value(s) replaced with placeholders.");
+      }
+      if (ner && ner.ok) {
+        statusBits.push(
+          (ner.entities || 0) + " name span(s) from the local model" +
+            (ner.inferenceTimeMs != null ? " in " + ner.inferenceTimeMs + " ms" : "") + "."
+        );
+      } else if (ner && ner.ok === false) {
+        statusBits.push("Name model skipped: " + (ner.error || "unavailable") + ".");
+      }
       setStatus(
-        replaced
-          ? "Snapshot created locally. " + replaced + " value(s) replaced with placeholders."
+        statusBits.length
+          ? "Snapshot created locally. " + statusBits.join(" ")
           : "Snapshot created locally. Nothing was uploaded."
       );
-      renderSnapshot(response.snapshot);
+      renderSnapshot(response.snapshot, ner);
       showReadable();
     }
   );
@@ -343,10 +311,6 @@ function analyzeCurrentPage() {
 analyzeButton.addEventListener("click", analyzeCurrentPage);
 viewReadable.addEventListener("click", showReadable);
 viewJson.addEventListener("click", showJson);
-if (revealToggle) {
-  revealToggle.addEventListener("change", renderVault);
-}
-
 copyJson.addEventListener("click", function () {
   if (!latestSnapshot) {
     return;
@@ -374,6 +338,52 @@ var detectionListEl = document.getElementById("detection-list");
 var hybridTableEl = document.getElementById("hybrid-table");
 var visionJsonEl = document.getElementById("vision-json");
 var runOcrEl = document.getElementById("run-ocr");
+
+function updateNerStatus(ner) {
+  var stateEl = document.getElementById("ner-state");
+  var backendEl = document.getElementById("ner-backend");
+  if (!stateEl) {
+    return;
+  }
+  if (!ner) {
+    stateEl.textContent = "Idle";
+    if (backendEl) {
+      backendEl.textContent = "—";
+    }
+    return;
+  }
+  if (ner.ok === false) {
+    stateEl.textContent = "Error";
+    if (backendEl) {
+      backendEl.textContent = "—";
+    }
+    return;
+  }
+  if (ner.status === "loading") {
+    var bits = ["Downloading"];
+    if (ner.progress != null && !isNaN(ner.progress)) {
+      bits.push(ner.progress + "%");
+    }
+    if (ner.file) {
+      var shortName = String(ner.file).split("/").pop();
+      if (shortName) {
+        bits.push(shortName);
+      }
+    }
+    stateEl.textContent = bits.join(" ");
+    if (backendEl) {
+      backendEl.textContent = "wasm";
+    }
+    if (ner.progress != null && !isNaN(ner.progress)) {
+      setStatus("Downloading name model " + ner.progress + "%…");
+    }
+    return;
+  }
+  stateEl.textContent = ner.ok ? "Ready" : (ner.status === "ready" ? "Ready" : "Idle");
+  if (backendEl) {
+    backendEl.textContent = ner.backend || "—";
+  }
+}
 
 function updateVisionStatus(status) {
   if (!status) {
@@ -522,7 +532,7 @@ function drawDetections(dataUrl, detections, ocrItems, snapshot) {
       var th = fontSize + 8;
       ctx.fillStyle = color;
       ctx.fillRect(box.x, Math.max(0, box.y - th), tw, th);
-      ctx.fillStyle = "#04150f";
+      ctx.fillStyle = "#062016";
       ctx.fillText(title, box.x + 5, Math.max(fontSize, box.y - 6));
     }
 
@@ -530,15 +540,15 @@ function drawDetections(dataUrl, detections, ocrItems, snapshot) {
       if (!box || box.width < 2 || box.height < 2) {
         return;
       }
-      ctx.fillStyle = "rgba(6, 14, 12, 0.92)";
+      ctx.fillStyle = "rgba(8, 12, 10, 0.92)";
       ctx.fillRect(box.x, box.y, box.width, box.height);
-      ctx.strokeStyle = "rgba(61, 207, 142, 0.45)";
+      ctx.strokeStyle = "rgba(52, 196, 132, 0.4)";
       ctx.lineWidth = 1;
       ctx.strokeRect(box.x, box.y, box.width, box.height);
       var fontSize = Math.max(10, Math.min(14, Math.round(box.height * 0.55)));
       if (box.height >= 12 && title) {
-        ctx.font = fontSize + "px Segoe UI, sans-serif";
-        ctx.fillStyle = "#9ad4bf";
+        ctx.font = fontSize + "px system-ui, sans-serif";
+        ctx.fillStyle = "#8fd4b8";
         ctx.fillText(title, box.x + 4, box.y + Math.min(box.height - 3, fontSize + 2));
       }
     }
@@ -567,13 +577,17 @@ function drawDetections(dataUrl, detections, ocrItems, snapshot) {
 
     (detections || []).forEach(function (det) {
       var score = Math.round((det.confidence || 0) * 100);
-      paintStroke(det.boundingBox, "#3dcf8e", det.label + " " + score + "%");
+      if (det.redactPixels && det.sensitivity && det.sensitivity !== "unknown") {
+        paintMask(det.boundingBox, "face hidden");
+      } else {
+        paintStroke(det.boundingBox, "#34c484", det.label + " " + score + "%");
+      }
     });
     (ocrItems || []).forEach(function (item) {
       if (item.sensitivity && item.sensitivity !== "unknown") {
         paintMask(item.boundingBox, "ocr hidden");
       } else {
-        paintStroke(item.boundingBox, "#7ec8ff", item.text);
+        paintStroke(item.boundingBox, "#6eb8e8", item.text);
       }
     });
   };
@@ -596,6 +610,7 @@ function renderHybrid(decision) {
 function renderVision(payload) {
   var vision = payload.vision || {};
   var ocr = payload.ocr;
+  var ocrPlan = payload.ocrPlan;
   var policy = SensitivityForm && SensitivityForm.getPolicy ? SensitivityForm.getPolicy() : null;
   var annotated =
     BrowserAgent.sensitivity && BrowserAgent.sensitivity.annotatePixelSensitivity
@@ -610,7 +625,7 @@ function renderVision(payload) {
       ? BrowserAgent.hybrid.decide(payload.snapshot, vision, ocr)
       : null;
   var metrics = [
-    vision.model || "YOLOS-Tiny (baseline)",
+    vision.model || "OpenCV YuNet Face Detector",
     vision.backend || "unknown backend",
     vision.image && vision.image.width
       ? vision.image.width + " × " + vision.image.height
@@ -627,7 +642,14 @@ function renderVision(payload) {
     metrics.push(maskCount + " regions masked from DOM");
   }
   if (ocr) {
-    metrics.push("OCR " + ocr.inferenceTimeMs + " ms");
+    metrics.push(
+      "OCR " +
+      (ocrPlan && ocrPlan.mode === "automatic" ? "auto · " : "") +
+      ocr.inferenceTimeMs +
+      " ms"
+    );
+  } else if (ocrPlan && ocrPlan.mode === "skipped") {
+    metrics.push("OCR skipped");
   }
   visionMetricsEl.textContent = metrics.filter(Boolean).join(" · ");
   visionHybridEl.textContent = decision
@@ -635,7 +657,11 @@ function renderVision(payload) {
         ? "Hybrid: DOM is not enough for some pixels; vision was relevant."
         : "Hybrid: DOM already described the sensitive controls; vision ran only as a baseline.")
     : "";
-  drawDetections(payload.imageDataUrl, vision.detections, ocr && ocr.items, payload.snapshot);
+  if (payload.sanitizedImageDataUrl) {
+    drawDetections(payload.sanitizedImageDataUrl, [], [], null);
+  } else {
+    drawDetections(payload.imageDataUrl, vision.detections, ocr && ocr.items, payload.snapshot);
+  }
   detectionListEl.replaceChildren();
   (vision.detections || []).forEach(function (det) {
     var row = node("article", "element-row");
@@ -674,8 +700,8 @@ function renderVision(payload) {
         "p",
         "empty-list",
         maskCount
-          ? "YOLOS found no COCO objects. Only policy-flagged DOM regions were masked."
-          : "No objects detected at threshold 0.72."
+          ? "No face was detected by the model. Printed, small, or angled portraits can be missed; policy-flagged DOM regions were still masked."
+          : "No face was detected by the model. Printed, small, or angled portraits can be missed."
       )
     );
   }
@@ -684,7 +710,10 @@ function renderVision(payload) {
     {
       vision: vision,
       ocr: ocr,
+      ocrPlan: ocrPlan,
       hybrid: decision,
+      privacyManifest: payload.privacyManifest || null,
+      normalizedDetections: payload.normalizedDetections || [],
       screenshotLeftDevice: false
     },
     null,
@@ -700,7 +729,9 @@ function analyzeCurrentScreen() {
   }
   visionButton.disabled = true;
   visionLabel.textContent = "Running local vision…";
-  setStatus("Capturing the visible tab and running on-device inference. The screenshot is not uploaded.");
+  setStatus(
+    "Capturing the visible tab and running on-device inference. OCR will run automatically when pixel text may be present."
+  );
   chrome.runtime.sendMessage(
     { type: "ANALYZE_SCREEN", runOcr: runOcrEl.checked, sensitivityPolicy: SensitivityForm && SensitivityForm.getPolicy ? SensitivityForm.getPolicy() : null },
     function (response) {
@@ -714,12 +745,16 @@ function analyzeCurrentScreen() {
         setStatus((response && response.error) || "Local vision failed.", true);
         return;
       }
-      setStatus("Local vision finished. Screenshot stayed on this device.");
+      setStatus(
+        response.ocrPlan && response.ocrPlan.run
+          ? "Local vision and OCR finished. Screenshot stayed on this device."
+          : "Local vision finished. OCR skipped because the viewport DOM exposed no image, canvas, or video."
+      );
       // Records arrive on this path but the vault does not, so a vision run
       // can draw masks without being able to reveal anything.
       latestRedaction = response.redaction || null;
       if (response.snapshot) {
-        renderSnapshot(response.snapshot);
+        renderSnapshot(response.snapshot, response.ner);
         showReadable();
       }
       renderVision(response);
@@ -730,18 +765,201 @@ function analyzeCurrentScreen() {
 visionButton.addEventListener("click", analyzeCurrentScreen);
 
 if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-  chrome.runtime.sendMessage({ type: "VISION_INIT" }, function (response) {
-    if (chrome.runtime.lastError) {
-      visionStateEl.textContent = "Error";
-      return;
-    }
-    if (response && response.status) {
-      updateVisionStatus(response.status);
-    }
-  });
   chrome.runtime.onMessage.addListener(function (message) {
     if (message && message.type === "OFFSCREEN_STATUS") {
       updateVisionStatus(message);
     }
+    if (message && message.type === "OFFSCREEN_NER_STATUS") {
+      updateNerStatus(message);
+    }
+    if (message && message.type === "AGENT_STATUS" && message.entry) {
+      appendAgentLog(message.entry);
+    }
   });
 }
+
+var agentGoalEl = document.getElementById("agent-goal");
+var agentModeEl = document.getElementById("agent-mode");
+var agentRunEl = document.getElementById("agent-run");
+var agentStopEl = document.getElementById("agent-stop");
+var agentStateEl = document.getElementById("agent-state");
+var agentErrorEl = document.getElementById("agent-error");
+var agentOutputEl = document.getElementById("agent-output");
+var agentLogEl = document.getElementById("agent-log");
+var agentPreviewEl = document.getElementById("agent-sanitized-preview");
+var agentImageNoteEl = document.getElementById("agent-image-note");
+var agentContextEl = document.getElementById("agent-context-preview");
+var agentPrivacyEl = document.getElementById("agent-privacy-summary");
+var agentTimingsEl = document.getElementById("agent-timings");
+var privacySubtitleEl = document.getElementById("privacy-subtitle");
+var privacyPillEl = document.getElementById("privacy-pill");
+
+function setAgentRunning(running) {
+  agentRunEl.disabled = running;
+  agentStopEl.disabled = !running;
+  agentStateEl.textContent = running ? "Running" : "Idle";
+  agentStateEl.classList.toggle("is-running", running);
+  if (running) {
+    privacySubtitleEl.textContent = "Agent mode · only sanitized context is transmitted";
+    privacyPillEl.lastChild.textContent = " Agent";
+  }
+}
+
+function appendAgentLog(entry) {
+  if (!agentLogEl || !entry) {
+    return;
+  }
+  var item = document.createElement("li");
+  var title = document.createElement("strong");
+  title.textContent = "Step " + (entry.step || "—") + " · " + (entry.phase || "status");
+  item.appendChild(title);
+  item.appendChild(document.createTextNode(" — " + (entry.detail || "")));
+  agentLogEl.appendChild(item);
+  agentLogEl.scrollTop = agentLogEl.scrollHeight;
+}
+
+function renderPrivacyManifest(manifest) {
+  agentPrivacyEl.replaceChildren();
+  var categories = (manifest && manifest.categories) || {};
+  var names = Object.keys(categories);
+  if (!names.length) {
+    agentPrivacyEl.appendChild(node("span", "privacy-chip", "No detected categories"));
+    return;
+  }
+  names.sort().forEach(function (category) {
+    agentPrivacyEl.appendChild(
+      node("span", "privacy-chip", category.replace(/_/g, " ") + " · " + categories[category])
+    );
+  });
+}
+
+function renderAgentTimings(timings) {
+  agentTimingsEl.replaceChildren();
+  var labels = {
+    captureMs: "Capture",
+    domMs: "DOM",
+    domExtractionMs: "DOM + rule detection",
+    ruleRedactionMs: "Structured redaction",
+    nerMs: "NER",
+    visionMs: "Face detection",
+    ocrMs: "OCR",
+    redactionMs: "Pixel redaction",
+    serverMs: "Server",
+    totalAgentMs: "Total",
+    totalClientMs: "Client total",
+    payloadBytes: "Payload",
+    sanitizedImageBytes: "Sanitized image",
+    heapEstimateBytes: "JS heap estimate",
+    peakCanvasWidth: "Peak canvas width",
+    peakCanvasHeight: "Peak canvas height"
+  };
+  Object.keys(labels).forEach(function (key) {
+    if (!timings || timings[key] == null) {
+      return;
+    }
+    var value =
+      key === "payloadBytes" || key === "sanitizedImageBytes" || key === "heapEstimateBytes"
+        ? Math.round(timings[key] / 1024) + " KB"
+        : key === "peakCanvasWidth" || key === "peakCanvasHeight"
+          ? timings[key] + " px"
+          : timings[key] + " ms";
+    var row = node("div", "compare-row");
+    row.appendChild(node("span", "", labels[key]));
+    row.appendChild(node("strong", "", value));
+    agentTimingsEl.appendChild(row);
+  });
+}
+
+function renderAgentResult(response, analysisMode) {
+  agentOutputEl.hidden = false;
+  if (response && response.snapshot) {
+    agentContextEl.textContent = JSON.stringify(response.snapshot, null, 2);
+  }
+  var screenshot = response && response.sanitizedScreenshot;
+  if (screenshot && screenshot.dataUrl) {
+    agentPreviewEl.src = screenshot.dataUrl;
+    agentPreviewEl.hidden = false;
+    agentImageNoteEl.hidden = false;
+    agentImageNoteEl.textContent =
+      analysisMode === "sanitized-image"
+        ? "This sanitized image was eligible for transmission."
+        : "This sanitized preview stayed local; only structured context was sent.";
+  } else {
+    agentPreviewEl.removeAttribute("src");
+    agentPreviewEl.hidden = true;
+    agentImageNoteEl.hidden = false;
+    agentImageNoteEl.textContent = "No screenshot was captured or transmitted in DOM-only mode.";
+  }
+  renderPrivacyManifest(response && response.privacyManifest);
+  renderAgentTimings(response && response.timings);
+}
+
+function finishAgentState(response) {
+  setAgentRunning(false);
+  var status = response && response.ok ? "Complete" : (response && /stopped/i.test(response.error || "") ? "Stopped" : "Error");
+  agentStateEl.textContent = status;
+  agentStateEl.classList.toggle("is-error", status === "Error");
+  agentErrorEl.hidden = Boolean(response && response.ok);
+  agentErrorEl.textContent = response && !response.ok ? response.error || "Agent failed." : "";
+}
+
+agentRunEl.addEventListener("click", function () {
+  var goal = agentGoalEl.value.trim();
+  if (!goal) {
+    agentErrorEl.hidden = false;
+    agentErrorEl.textContent = "Enter a goal first.";
+    return;
+  }
+  var shouldConfirm = document.getElementById("confirm-remote").checked;
+  if (
+    shouldConfirm &&
+    !window.confirm(
+      "Run agent mode? Only locally sanitized context—and a sanitized image in image mode—will be sent to the configured agent server."
+    )
+  ) {
+    return;
+  }
+  var allowDestructive = document.getElementById("allow-destructive").checked;
+  if (
+    allowDestructive &&
+    !window.confirm("Allow the agent to activate submit, continue, send, purchase, or delete controls?")
+  ) {
+    allowDestructive = false;
+  }
+
+  agentErrorEl.hidden = true;
+  agentLogEl.replaceChildren();
+  agentOutputEl.hidden = false;
+  setAgentRunning(true);
+  var analysisMode = agentModeEl.value;
+  chrome.runtime.sendMessage(
+    {
+      type: "RUN_AGENT",
+      goal: goal,
+      analysisMode: analysisMode,
+      contextMode: contextModeEl.value,
+      sensitivityPolicy: SensitivityForm.getPolicy(),
+      remoteConfirmed: true,
+      allowDestructive: allowDestructive
+    },
+    function (response) {
+      if (chrome.runtime.lastError) {
+        response = { ok: false, error: chrome.runtime.lastError.message };
+      }
+      (response && response.log || []).forEach(function (entry) {
+        if (!agentLogEl.textContent.includes(entry.detail || "")) {
+          appendAgentLog(entry);
+        }
+      });
+      renderAgentResult(response || {}, analysisMode);
+      finishAgentState(response || {});
+    }
+  );
+});
+
+agentStopEl.addEventListener("click", function () {
+  chrome.runtime.sendMessage({ type: "STOP_AGENT" }, function () {
+    setAgentRunning(false);
+    agentStateEl.textContent = "Stopped";
+  });
+});

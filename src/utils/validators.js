@@ -197,6 +197,42 @@ function upperCompact(raw) {
  */
 var MATCHERS = [
   {
+    category: "password",
+    confidence: "structure",
+    source: "\\b(?:password|passwd|passcode)\\s*(?:is|[:=])\\s*\\S+",
+    flags: "gi",
+    normalize: function (raw) {
+      return raw;
+    },
+    validate: function (value) {
+      return value.length <= 1024;
+    }
+  },
+  {
+    category: "otp",
+    confidence: "structure",
+    source: "\\b(?:otp|one[-\\s]?time\\s*code|verification\\s*code)\\s*(?:is|[:=])\\s*\\d{4,8}\\b",
+    flags: "gi",
+    normalize: function (raw) {
+      return raw;
+    },
+    validate: function () {
+      return true;
+    }
+  },
+  {
+    category: "cvv",
+    confidence: "structure",
+    source: "\\b(?:cvv2?|cvc|security\\s*code)\\s*(?:is|[:=])\\s*\\d{3,4}\\b",
+    flags: "gi",
+    normalize: function (raw) {
+      return raw;
+    },
+    validate: function () {
+      return true;
+    }
+  },
+  {
     category: "aadhaar",
     confidence: "checksum",
     source: "\\b[2-9]\\d{3}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b",
@@ -235,6 +271,31 @@ var MATCHERS = [
     flags: "g",
     normalize: upperCompact,
     validate: ifscValid
+  },
+  {
+    category: "authentication_secret",
+    confidence: "structure",
+    source: "\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b",
+    flags: "g",
+    normalize: function (raw) {
+      return raw;
+    },
+    validate: function (value) {
+      return value.length <= 4096;
+    }
+  },
+  {
+    category: "authentication_secret",
+    confidence: "structure",
+    source:
+      "\\b(?:Bearer\\s+|access[_-]?token[=:]|session(?:id|token)[=:]|api[_-]?key[=:])[A-Za-z0-9._~+/-]{8,}",
+    flags: "gi",
+    normalize: function (raw) {
+      return raw;
+    },
+    validate: function (value) {
+      return value.length <= 4096;
+    }
   },
   {
     category: "email",

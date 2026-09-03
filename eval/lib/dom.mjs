@@ -81,7 +81,8 @@ export function loadUtils(root) {
   const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
     runScripts: "dangerously"
   });
-  for (const file of contentScriptFiles(root)) {
+  const files = contentScriptFiles(root).concat(["src/vision/hybrid/decisionLayer.js"]);
+  for (const file of files) {
     const el = dom.window.document.createElement("script");
     el.textContent = fs.readFileSync(path.join(root, file), "utf8");
     dom.window.document.head.appendChild(el);

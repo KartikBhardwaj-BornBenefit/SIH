@@ -1,5 +1,9 @@
 /**
- * Copy WASM/runtime files and bundle the offscreen vision host.
+ * Copy WASM/runtime files and bundle the offscreen inference host.
+ *
+ * The entry point is offscreen.js, so vision, OCR, and NER are all pulled in
+ * transitively — adding a model layer needs no change here as long as the
+ * offscreen host imports it.
  */
 import * as esbuild from "esbuild";
 import fs from "fs";
@@ -42,6 +46,24 @@ if (!onnxCopied.length) {
   copyMatching(onnxDir, onnxDest, (name) => /\.(wasm|mjs)$/.test(name));
 }
 
+async function downloadFaceModel() {
+  const visionDest = path.join(root, "vendor", "vision");
+  const dest = path.join(visionDest, "face_detection_yunet_2023mar.onnx");
+  if (fs.existsSync(dest)) {
+    return;
+  }
+  ensureDir(visionDest);
+  const url =
+    "https://github.com/opencv/opencv_zoo/raw/main/models/" +
+    "face_detection_yunet/face_detection_yunet_2023mar.onnx";
+  console.log("Downloading OpenCV YuNet face model…");
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error("Could not download YuNet model: HTTP " + res.status);
+  }
+  fs.writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
+}
+
 const tessJs = path.join(root, "node_modules", "tesseract.js", "dist");
 const tessCore = path.join(root, "node_modules", "tesseract.js-core");
 const tessDest = path.join(root, "vendor", "tesseract");
@@ -67,7 +89,12 @@ async function downloadLang() {
   fs.writeFileSync(dest, buf);
 }
 
-await downloadLang();
+if (process.env.SKIP_MODEL_DOWNLOADS === "1") {
+  console.log("Skipping optional model downloads for CI.");
+} else {
+  await downloadFaceModel();
+  await downloadLang();
+}
 
 await esbuild.build({
   absWorkingDir: root,
@@ -82,6 +109,7 @@ await esbuild.build({
   logLevel: "info"
 });
 
-console.log("Vision host bundled.");
+console.log("Offscreen host bundled (vision + OCR + NER).");
 console.log("ONNX runtime files:", fs.existsSync(onnxDest) ? fs.readdirSync(onnxDest).length : 0);
+console.log("Vision model:", fs.existsSync(path.join(root, "vendor", "vision")) ? "YuNet" : "missing");
 console.log("Tesseract files:", fs.existsSync(tessDest) ? fs.readdirSync(tessDest).length : 0);

@@ -1,15 +1,15 @@
 {
-  "recordedAt": "2026-09-03T13:25:52.311Z",
+  "recordedAt": "2026-09-03T16:21:15.354Z",
   "note": "Detection metrics only. Visibility is not exercised here; see eval/lib/dom.mjs. Update with: npm run eval -- --update",
-  "pages": 15,
+  "pages": 16,
   "metrics": {
     "overall": {
       "tp": 46,
       "fp": 0,
-      "fn": 6,
+      "fn": 10,
       "precision": 1,
-      "recall": 0.8846,
-      "f1": 0.9388
+      "recall": 0.8214,
+      "f1": 0.902
     },
     "categories": {
       "aadhaar": {
@@ -103,7 +103,7 @@
       "person_name": {
         "tp": 0,
         "fp": 0,
-        "fn": 6,
+        "fn": 10,
         "precision": 1,
         "recall": 0,
         "f1": 0

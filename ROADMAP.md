@@ -15,18 +15,17 @@ what it cannot do. Do not claim accuracy we have not measured.
 | 3 | Value-level detection for structured identifiers | Done |
 | 4 | Evaluation harness and per-category metrics | Done |
 | 5 | Safe snapshot / redaction pipeline | Done |
-| 6 | NER model for unstructured PII | Planned — next |
-| 7 | Purpose-built visual detector | Planned |
+| 6 | NER model for unstructured PII | Done |
+| 7 | Purpose-built visual detector | Done |
 | 8 | Address word senses, Hindi keywords | Done (pulled forward) |
 | 8 | Field-purpose classifier, DOM coverage gaps | Backlog |
 
 ## The problem this roadmap solves
 
-Every sensitivity decision today is a hand-written rule in
+The original sensitivity layer was a hand-written catalog in
 `src/utils/sensitivityCatalog.js`, matched by `matchesAny()` in
-`src/utils/sensitivity.js`. YOLOS-Tiny runs on every screen analysis but
-contributes exactly one signal to the privacy decision: whether a COCO
-`person` box was found.
+`src/utils/sensitivity.js`. The Phase 2 YOLOS-Tiny baseline contributed only
+one signal to the privacy decision: whether a COCO `person` box was found.
 
 That is not uniformly wrong. It is wrong in three specific places.
 
@@ -310,13 +309,46 @@ snapshot that is actually safe to hand to a model.
 
 ---
 
-## Phase 6 — NER model for unstructured PII
+## Phase 6 — NER model for unstructured PII — DONE
 
-**Goal:** catch what regex fundamentally cannot — person names, street
-addresses, organisations — and do it in languages our patterns do not cover.
+**Goal:** catch what regex fundamentally cannot — person names in prose — and
+do it on device, after the rule pass has already replaced every identifier it
+recognises.
 
-This is where a model genuinely earns its place, and where we can honestly
-say an ONNX model made the decision.
+This is where a model genuinely earns its place. The checkpoint is English
+only; that limitation is measured rather than hidden.
+
+### Outcome
+
+`src/nlp/` mirrors the vision layer: `NerAdapter` contract, DistilBERT NER
+(`onnx-community/distilbert-NER-ONNX`, q8, WASM only — 66 MB). BERT-base was
+the first pick and was too slow: its q8 file is 108 MB, WebGPU can pull the
+431 MB fp32 sibling, and one WASM pass per snapshot field made a finished
+download look hung. Packing plus skipping `href`/`src` is what makes Analyze
+return. Same CoNLL-03 PER labels, still English-only.
+
+Redaction is two passes. `build` still runs entirely in the content script.
+`textsForModel` / `applyEntities` mint into the **same** vault, so one value
+keeps one placeholder across both. The ordering is a privacy decision: the
+strings that cross into the offscreen document already have checksum-verified
+identifiers replaced. The vault never moves.
+
+`LOC` is **not** mapped to `address`. CoNLL location tags fire on any place
+name in prose ("Bengaluru", "Whitefield"), which is not a postal address, and
+the address category already scores from autocomplete tokens and postal-code
+patterns. Mapping it would have traded a large amount of precision for recall
+the catalog already has.
+
+The model loads only when `person_name` is enabled and a page is analysed.
+Opening the popup does not fetch the weights.
+
+`npm run eval` still does **not** run the ONNX model. It tests grouping,
+chunking, placeholder splicing, and the policy gate. Corpus scores remain
+rule-only: `unstructured-names.html` and `devanagari-names.html` are expected
+misses in the harness. A live Analyze click is what exercises the checkpoint.
+The Devanagari page is expected to stay at zero even then — that is the cost
+of the English checkpoint, written as a number so an IndicNER conversion can
+be justified later.
 
 ### Work
 
@@ -327,19 +359,18 @@ say an ONNX model made the decision.
 2. Run `token-classification` over the extracted text only, not raw page
    HTML. Chunk to the model's 512-token limit with overlap so entities are not
    split at boundaries.
-3. Map entity labels onto existing catalog categories (`PER` → `person_name`,
-   `LOC` → `address`, `ORG` → contextual) and keep them behind the same
-   user-facing policy checkboxes.
+3. Map entity labels onto existing catalog categories. Only `PER` →
+   `person_name` is enabled. `LOC` / `ORG` / `MISC` stay unmapped on purpose.
 4. Feed results through the Phase 5 redaction records so NER hits are masked
    and placeholdered like everything else.
 
 ### Checkpoint selection — DECIDED
 
-**`Xenova/bert-base-NER`, int8-quantised.** Chosen for zero conversion risk:
-it ships a ready-made ONNX build that the existing Transformers.js runtime can
-load today, so Phase 6 spends its budget on the pipeline rather than on an
-`optimum` export that might not converge. Quantised to keep the first-run
-download in the tens of megabytes, which is the binding product constraint.
+**`onnx-community/distilbert-NER-ONNX`, q8, WASM only.** BERT-base was the
+first pick and failed the size constraint in practice: q8 is 108 MB, WebGPU
+can fetch the 431 MB fp32 file, and one WASM pass per field made a finished
+download look hung. DistilBERT q8 is 66 MB, same CoNLL-03 PER labels, still
+English-only.
 
 The cost is real and should be stated rather than discovered later: this
 checkpoint is **English-only and CoNLL-03 trained**, so it will not read a
@@ -350,9 +381,7 @@ not names in prose.
 
 The mitigation is architectural, not model-side: keep `NerAdapter` a genuine
 contract so the checkpoint is swappable, and treat IndicNER conversion as a
-follow-up that reuses the whole pipeline. Prove the plumbing with the easy
-model, then pay the conversion cost once with a harness that can already
-measure whether it helped.
+follow-up that reuses the whole pipeline.
 
 ### Other candidates, for when the swap happens
 
@@ -367,17 +396,20 @@ and quantisation as a research task with a measured outcome, not a given.
 
 ### Constraints to respect
 
-- **Download size is a product constraint.** An extension that pulls hundreds
-  of megabytes on first run is not shippable. Quantise to int8/q8 and load the
-  NER model lazily, only when the user enables an unstructured-PII category.
-- Reuse the existing WebGPU-then-WASM fallback pattern from
-  `YolosTinyAdapter`.
+- **Download size is a product constraint.** DistilBERT q8 is 66 MB. Do not
+  retry WebGPU for this model; it pulls the 261 MB fp32 file and can stall on
+  shader compile.
+- Load lazily, only when the user enables an unstructured-PII category.
 
 ### Acceptance
 
-- Measured improvement over the Phase 4 baseline on `person_name` and
-  `address`, reported per category.
-- Model loads lazily; disabling those categories means it is never fetched.
+- Plumbing ships behind the same policy checkbox. Disabling Person name means
+  the model is never fetched.
+- Grouping, chunking, and `applyEntities` are pinned by `eval/checks/ner.mjs`.
+- Corpus headroom for names is labelled and recorded; the English checkpoint's
+  Indic gap is a page (`devanagari-names.html`), not a comment.
+- Live Analyze is what runs the checkpoint. `npm run eval` stays rule-only so
+  the harness does not need a 65 MB download.
 
 ---
 
@@ -390,20 +422,38 @@ YOLOS-Tiny fires on a full-body photo of a stranger's back and misses a
 cropped face. The adapter's own header already says it is not a privacy
 model. Replace it rather than defend it.
 
+### Outcome
+
+OpenCV YuNet is now the default vision adapter. Its roughly 232 KB ONNX model
+is packaged by `npm run build` and reuses the ONNX runtime already needed by
+NER, so screen analysis performs no face-model download and screenshots stay
+inside the extension. Face detections are labelled `face`, flow through the
+existing `faces_people` policy, and are masked in the screenshot preview when
+enabled.
+
+`YolosTinyAdapter` remains in the tree unchanged as the Phase 2 benchmark; it
+is no longer the production default.
+
+The OCR over-redaction bug is fixed by mapping `<img>` and `<canvas>` viewport
+boxes into screenshot pixels. Generic OCR text gets
+`image_embedded_text`/`canvas_text` only when its box falls inside one of those
+regions. Structured identifiers found by OCR still use the shared validator
+layer regardless of region. The evaluation harness pins these policy rules;
+live browser testing is still required for WASM inference and visual box
+alignment.
+
 ### Work
 
-1. Swap in a face detector. Pragmatic option: MediaPipe Face Detector
-   (BlazeFace) — purpose-built, very small, runs WASM/WebGPU. It sits outside
-   the Transformers.js stack, so it needs its own `ModelAdapter`
-   implementation; weigh that against finding an ONNX face detector and
-   keeping a single runtime.
+1. Swap in a face detector. Done with OpenCV YuNet: it is purpose-built,
+   compact, and keeps a single ONNX runtime instead of packaging MediaPipe's
+   additional module WASM.
 2. Optional and more differentiated: fine-tune a small detector on ID-card and
    document imagery. This is the strongest visual story for an Indian privacy
    project, but it needs a dataset plan first.
 3. Keep `YolosTinyAdapter` registered as the benchmark baseline so Phase 2
    measurements stay reproducible.
 
-### Fix while here
+### Fix while here — DONE
 
 `annotatePixelSensitivity()` pushes `image_embedded_text` onto **every** OCR
 item whenever that policy is on, which is the default. Everything then gets a
@@ -489,25 +539,28 @@ is supposed to fix. Checks grew from 82 to 117.
 
 ## Cross-cutting cleanups
 
-- **README section 6 is stale.** "What we are deliberately not implementing
-  yet" still lists OCR, Transformers.js, WebGPU, ONNX Runtime, and screenshots
-  as model input. All shipped in Phase 2 and are documented later in the same
-  file.
-- **README section 3 injection list** omits `src/utils/sensitivityCatalog.js`,
-  which `serviceWorker.js` does inject.
+- **README and model references updated.** The architecture, server, SIH demo,
+  YuNet model, trust boundaries and limitations now match the implementation.
 - **`src/models/schema.js` is documentation only** and is never injected. It
   can drift from what `domExtractor.js` actually emits. Consider asserting the
   shape in the Phase 4 harness.
-- **No CI or linting.** Once Phase 4 exists, wire `npm run eval` into a
-  workflow so regressions are caught rather than discovered.
+- **CI and linting added.** Standard CI runs lockfile install, bundle build,
+  syntax checks, the unchanged evaluation baseline, safety/server tests and a
+  fast unpacked-extension integration run without downloading model weights.
 
-## Non-goals
+## SIH end-to-end agent — delivered
 
-Unchanged from the README, and worth restating because Phase 5 makes the
-temptation stronger:
+The shipped loop is explicit-user-action only:
 
-- No backend, and no network upload of page content or screenshots. The only
-  permitted network traffic remains one-time model weight downloads.
-- No server-side LLM or VLM.
-- No automatic clicking, typing, or form filling until the safe-snapshot
-  contract in Phase 5 is in place and tested.
+1. extract and redact DOM locally;
+2. optionally capture and sanitize visible pixels locally;
+3. mechanically reject unbranded or leaking payloads;
+4. call the local validation server (mock or OpenAI-compatible provider);
+5. validate a closed action schema and current `element_N` ids;
+6. refuse credential fills and unconfirmed destructive controls;
+7. apply locally, refresh and stop on completion, cancellation, repetition,
+   step count or runtime bounds.
+
+Remaining non-goals are silent/background capture, arbitrary code/selectors or
+model-generated navigation, server access to the vault, and untested Firefox
+support.

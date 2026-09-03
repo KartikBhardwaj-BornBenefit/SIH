@@ -9,84 +9,167 @@
     <div class="shell">
       <header class="header">
         <div class="brand">
-          <div class="logo" aria-hidden="true">
-            <span class="logo-mark"></span>
-          </div>
+          <div class="logo" aria-hidden="true"></div>
           <div class="brand-text">
             <h1>Browser Agent</h1>
-            <p>Phase 5 · safe snapshot · nothing uploaded</p>
+            <p id="privacy-subtitle">Local analysis · nothing uploaded</p>
           </div>
         </div>
-        <span class="local-pill" title="Page data never leaves this device">
+        <span id="privacy-pill" class="local-pill" title="Local mode does not transmit page data">
           <span class="local-dot"></span>
-          Local only
+          Local
         </span>
       </header>
 
-      <section class="vision-status" aria-live="polite">
-        <div class="compare-row">
-          <span>DOM context</span>
-          <strong>Ready</strong>
-        </div>
-        <div class="compare-row">
-          <span>Vision model</span>
-          <strong id="vision-state">Starting…</strong>
-        </div>
-        <div class="compare-row">
-          <span>Backend</span>
-          <strong id="vision-backend">—</strong>
-        </div>
-        <p id="vision-note" class="vision-note">YOLOS-Tiny is a baseline detector, not the final privacy model.</p>
+      <section class="analysis-card">
+        <label class="mode-field">
+          <span class="field-label">Context</span>
+          <select id="context-mode" aria-label="Context mode">
+            <option value="visible" selected>Visible DOM</option>
+            <option value="viewport">Current Viewport</option>
+          </select>
+        </label>
+
+        <button id="analyze-button" type="button">
+          <svg class="analyze-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="7" cy="7" r="5.25" fill="none" stroke="currentColor" stroke-width="1.8"></circle>
+            <path d="M11 11.4 14.2 14.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+          </svg>
+          <span id="analyze-label">Analyze current page</span>
+        </button>
+
+        <p id="status" class="status" hidden role="status" aria-live="polite"></p>
       </section>
 
-      <label class="mode-field">
-        <span class="mode-label">Context mode</span>
-        <select id="context-mode" aria-label="Context mode">
-          <option value="visible" selected>Visible DOM</option>
-          <option value="viewport">Current Viewport</option>
-        </select>
-      </label>
+      <section class="secondary-actions">
+        <button id="vision-button" class="secondary-action" type="button">
+          <span id="vision-label">Analyze current screen</span>
+        </button>
+        <label class="ocr-toggle">
+          <input id="run-ocr" type="checkbox">
+          <span>
+            Always run local OCR
+            <small>Otherwise runs automatically for images, canvas, or video.</small>
+          </span>
+        </label>
+      </section>
 
-      <details class="policy-panel">
-        <summary>Sensitive data categories</summary>
-        <p class="policy-help">
-          Detection is a local checklist, not a trained PII model. Tick what
-          this extension should treat as sensitive. Unchecked items are ignored.
-        </p>
-        <form id="policy-form"></form>
-        <div class="policy-actions">
-          <button type="button" id="policy-all" class="ghost">All</button>
-          <button type="button" id="policy-none" class="ghost">None</button>
-          <button type="button" id="policy-reset" class="ghost">Defaults</button>
+      <section class="agent-card" aria-labelledby="agent-heading">
+        <div class="agent-heading-row">
+          <div>
+            <span class="eyebrow">SIH agent</span>
+            <h2 id="agent-heading">Run a safe browser task</h2>
+          </div>
+          <span id="agent-state" class="agent-state">Idle</span>
         </div>
+        <label class="agent-field">
+          <span class="field-label">Goal</span>
+          <textarea id="agent-goal" rows="3" maxlength="2000" placeholder="Fill the contact form using the approved email placeholder, choose Student and continue, but do not fill the password."></textarea>
+        </label>
+        <label class="agent-field">
+          <span class="field-label">Analysis mode</span>
+          <select id="agent-mode">
+            <option value="dom">DOM only</option>
+            <option value="hybrid" selected>Hybrid DOM + local vision</option>
+            <option value="sanitized-image">Sanitized image + structured context</option>
+          </select>
+        </label>
+        <div class="agent-consent">
+          <label>
+            <input id="confirm-remote" type="checkbox" checked>
+            Confirm before transmitting sanitized context
+          </label>
+          <label>
+            <input id="allow-destructive" type="checkbox">
+            Allow submit/send after confirmation
+          </label>
+        </div>
+        <p class="agent-privacy">
+          Agent mode transmits only locally sanitized context. Raw screenshots,
+          vault values, passwords, OTPs and CVVs are never sent.
+        </p>
+        <div class="agent-actions">
+          <button id="agent-run" type="button">Run agent</button>
+          <button id="agent-stop" class="ghost" type="button" disabled>Stop</button>
+        </div>
+        <p id="agent-error" class="status is-error" hidden role="alert"></p>
+
+        <section id="agent-output" class="agent-output" hidden>
+          <div class="agent-preview-grid">
+            <div>
+              <h3>Sanitized screenshot</h3>
+              <img id="agent-sanitized-preview" alt="Sanitized screenshot sent to the agent server" hidden>
+              <p id="agent-image-note" class="muted">No image transmitted in this mode.</p>
+            </div>
+            <div>
+              <h3>Privacy summary</h3>
+              <div id="agent-privacy-summary" class="privacy-chips"></div>
+            </div>
+          </div>
+          <details>
+            <summary>Redacted structured context</summary>
+            <pre id="agent-context-preview" class="output"></pre>
+          </details>
+          <div>
+            <h3>Progress and validated actions</h3>
+            <ol id="agent-log" class="agent-log"></ol>
+          </div>
+          <div>
+            <h3>Latency</h3>
+            <div id="agent-timings" class="compare"></div>
+          </div>
+        </section>
+      </section>
+
+      <details class="advanced-panel">
+        <summary>Models &amp; privacy</summary>
+
+        <section class="vision-status" aria-live="polite">
+          <div class="status-grid">
+            <div class="status-item">
+              <span class="status-key">DOM</span>
+              <strong>Ready</strong>
+            </div>
+            <div class="status-item">
+              <span class="status-key">Vision</span>
+              <strong id="vision-state">Idle</strong>
+            </div>
+            <div class="status-item">
+              <span class="status-key">Vision backend</span>
+              <strong id="vision-backend">—</strong>
+            </div>
+            <div class="status-item">
+              <span class="status-key">Name model</span>
+              <strong id="ner-state">Idle</strong>
+            </div>
+            <div class="status-item">
+              <span class="status-key">Name backend</span>
+              <strong id="ner-backend">—</strong>
+            </div>
+          </div>
+          <p id="vision-note" class="vision-note">Vision uses a packaged 232 KB YuNet model through the local ONNX runtime. The name model downloads separately on first use.</p>
+        </section>
+
+        <details class="policy-panel">
+          <summary>Sensitive data categories</summary>
+          <p class="policy-help">
+            Unchecked categories are ignored. Person names use an on-device NER model
+            downloaded the first time that category is enabled.
+          </p>
+          <form id="policy-form"></form>
+          <div class="policy-actions">
+            <button type="button" id="policy-all" class="ghost">All</button>
+            <button type="button" id="policy-none" class="ghost">None</button>
+            <button type="button" id="policy-reset" class="ghost">Defaults</button>
+          </div>
+        </details>
       </details>
 
-      <button id="analyze-button" type="button">
-        <svg class="analyze-icon" viewBox="0 0 16 16" aria-hidden="true">
-          <circle cx="7" cy="7" r="5.25" fill="none" stroke="currentColor" stroke-width="1.8"></circle>
-          <path d="M11 11.4 14.2 14.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
-        </svg>
-        <span id="analyze-label">Analyze current page</span>
-      </button>
-
-      <button id="vision-button" class="secondary-action" type="button">
-        <span id="vision-label">Analyze current screen</span>
-      </button>
-      <label class="ocr-toggle">
-        <input id="run-ocr" type="checkbox">
-        Also run local OCR (experimental)
-      </label>
-
-      <p id="status" class="status" hidden role="status" aria-live="polite"></p>
-
       <section id="empty" class="empty">
-        <div class="empty-visual" aria-hidden="true">
-          <span></span><span></span><span></span>
-        </div>
         <h2>Inspect this tab</h2>
         <p>
-          Default context is only rendered-visible elements. Switch to
-          Current Viewport to keep what is on screen right now.
+          Analyze the current page to build a local, redacted snapshot.
+          Switch context to limit what is included.
         </p>
       </section>
 
@@ -106,50 +189,43 @@
           </div>
         </div>
 
-        <div class="compare" aria-label="Visibility comparison">
-          <div class="compare-row">
-            <span>Total DOM elements found</span>
-            <strong id="stat-found">0</strong>
+        <details class="compare-details">
+          <summary>Details</summary>
+          <div class="compare" aria-label="Visibility comparison">
+            <div class="compare-row">
+              <span>Total DOM elements found</span>
+              <strong id="stat-found">0</strong>
+            </div>
+            <div class="compare-row">
+              <span>Visible elements</span>
+              <strong id="stat-visible">0</strong>
+            </div>
+            <div class="compare-row">
+              <span>Current viewport elements</span>
+              <strong id="stat-viewport">0</strong>
+            </div>
+            <div class="compare-row">
+              <span>Interactive visible elements</span>
+              <strong id="stat-interactive-visible">0</strong>
+            </div>
+            <div class="compare-row">
+              <span>Identifier values found</span>
+              <strong id="stat-value-matched">0</strong>
+            </div>
+            <div class="compare-row">
+              <span>Checksum verified</span>
+              <strong id="stat-checksum">0</strong>
+            </div>
+            <div class="compare-row">
+              <span>Values replaced with placeholders</span>
+              <strong id="stat-redacted">0</strong>
+            </div>
+            <div class="compare-row">
+              <span>Names found by the local model</span>
+              <strong id="stat-ner">0</strong>
+            </div>
           </div>
-          <div class="compare-row">
-            <span>Visible elements</span>
-            <strong id="stat-visible">0</strong>
-          </div>
-          <div class="compare-row">
-            <span>Current viewport elements</span>
-            <strong id="stat-viewport">0</strong>
-          </div>
-          <div class="compare-row">
-            <span>Interactive visible elements</span>
-            <strong id="stat-interactive-visible">0</strong>
-          </div>
-          <div class="compare-row">
-            <span>Identifier values found</span>
-            <strong id="stat-value-matched">0</strong>
-          </div>
-          <div class="compare-row">
-            <span>Checksum verified</span>
-            <strong id="stat-checksum">0</strong>
-          </div>
-          <div class="compare-row">
-            <span>Values replaced with placeholders</span>
-            <strong id="stat-redacted">0</strong>
-          </div>
-        </div>
-
-        <label class="reveal-toggle">
-          <input type="checkbox" id="reveal-values" disabled>
-          Reveal what was redacted
-        </label>
-        <section id="vault-panel" class="vault-panel" hidden>
-          <p class="vault-caption">
-            Shown so you can check the redaction is right. These values are
-            held in this popup only, are gone when it closes, and are never
-            included in the JSON view or the Copy JSON button.
-          </p>
-          <div id="vault-list"></div>
-          <p id="vault-note" class="vault-note"></p>
-        </section>
+        </details>
 
         <div class="page-card">
           <p id="page-title" class="page-title"></p>
@@ -166,7 +242,7 @@
             <button type="button" id="copy-json" class="ghost">
               <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
                 <rect x="5" y="5" width="8" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
-                <path d="M3.5 11V3.8c0-.7.6-1.3 1.3-1.3H10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path>
+                <path d="M3.5 11V3.8c0-.6.6-1.3 1.3-1.3H10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"></path>
               </svg>
               <span id="copy-label">Copy JSON</span>
             </button>
@@ -179,7 +255,7 @@
 
       <section id="vision-results" class="results" hidden>
         <div class="page-card">
-          <p class="page-title">Local vision (baseline)</p>
+          <p class="page-title">Local face detection</p>
           <p id="vision-metrics" class="page-url"></p>
           <p id="vision-hybrid" class="page-flags"></p>
         </div>

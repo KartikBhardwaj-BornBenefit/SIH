@@ -1,6 +1,6 @@
 # Privacy-Preserving Browser Agent
 
-A Chrome Manifest V3 extension for a privacy-preserving browser agent. The DOM extractor is the first source of context, and identifiers found in it are verified by checksum rather than guessed from labels. A **local vision baseline** (YOLOS-Tiny via Transformers.js) runs only when you click **Analyze current screen**. Screenshots are never uploaded.
+A Chrome Manifest V3 extension for a privacy-preserving browser agent. The DOM extractor is the first source of context, and identifiers found in it are verified by checksum rather than guessed from labels. English person names in prose are found by a **local NER model** after those identifiers have already been replaced. A compact **local face detector** (OpenCV YuNet) runs only when you click **Analyze current screen**. Page content and screenshots are never uploaded.
 
 `ROADMAP.md` tracks what is built and what comes next.
 
@@ -9,18 +9,22 @@ A Chrome Manifest V3 extension for a privacy-preserving browser agent. The DOM e
 ```text
 popup  →  service worker  →  content script  →  page DOM
                 |                    |
-                |                    +---- DOM snapshot
+                |                    +-- extract, then rule-redact
+                |                    +-- ask offscreen for NER spans
+                |                    +-- apply name placeholders; vault stays here
                 |
-                +-- offscreen document (VisionEngine)
-                       YOLOS-Tiny baseline + optional Tesseract OCR
-                       WebGPU, with WASM fallback
+                +-- offscreen document (VisionEngine + NerEngine)
+                       OpenCV YuNet + optional Tesseract OCR
+                       DistilBERT NER (English, q8), loaded on first analysis
+                       local WASM inference
 ```
 
 - **Popup** (`src/popup/`): the only UI. Clicking **Analyze Current Page** asks the service worker to inspect the active tab. Results stay in the popup.
 - **Service worker** (`src/background/serviceWorker.js`): a Manifest V3 background script. It cannot see the page DOM. It injects the content script on demand, then forwards the snapshot back to the popup.
-- **Content script** (`src/content/`): runs in Chrome's *isolated world*. It can read the page DOM, but it does not share JavaScript with the page. Extraction logic lives in `domExtractor.js`.
+- **Content script** (`src/content/`): runs in Chrome's *isolated world*. It can read the page DOM, but it does not share JavaScript with the page. Extraction logic lives in `domExtractor.js`. Redaction lives in `redaction.js`.
 - **Utils** (`src/utils/`): visibility checks, the sensitivity catalog and classifier, identifier validators, text cleanup, and stable element ids.
-- **Models** (`src/models/`): the snapshot schema for later phases. There is no ML model here.
+- **NLP** (`src/nlp/`): on-device named-entity recognition. The popup and content script never import this; only the offscreen host does.
+- **Models** (`src/models/`): the snapshot schema for later phases. There is no ML checkpoint here.
 
 ### Why on-demand injection?
 
@@ -34,7 +38,7 @@ The extension uses `activeTab` and `scripting`. The content script is injected *
 4. **Chrome internal pages are off-limits.** `chrome://`, the Chrome Web Store, and similar URLs cannot be inspected.
 5. **Content scripts cannot see cross-origin iframe documents.** They also do not pierce closed Shadow DOM. Phase 1 does not pretend otherwise.
 
-DOM analysis does not call a remote API. The vision layer may **download model weights once** from Hugging Face and cache them in the browser. It does not send screenshots or page HTML anywhere.
+DOM analysis does not call a remote API. The vision and NER layers may **download model weights once** from Hugging Face and cache them in the browser. They do not send screenshots or page HTML anywhere. NER runs on strings that have already had checksum-verified identifiers replaced by placeholders.
 
 ## 1. Install locally in Chrome
 
@@ -210,7 +214,7 @@ Detection is not redaction. Finding an Aadhaar number and then serialising it an
 - **`agentContext`** — the snapshot with every detected value replaced by a typed placeholder (`<AADHAAR_1>`, `<EMAIL_2>`). This is the only object that is serialised, displayed, or copied. It is what the JSON view shows and what **Copy JSON** puts on your clipboard.
 - **`vault`** — placeholder to original value. Session only, never written to `chrome.storage`, never logged, never part of `agentContext`.
 
-Both are built **in the content script's isolated world**, so there is no code path that sends an unredacted snapshot anywhere. The service worker only ever relays an already-redacted object.
+Both are built **in the content script's isolated world**. The rule pass finishes there. The NER pass is the one exception: already-redacted strings are sent to the offscreen document, entity spans come back, and placeholders are minted in the tab. The vault never leaves the isolated world. The service worker only ever relays an already-redacted object plus those spans.
 
 ```text
 element_3  dd  #gp-1   text="<AADHAAR_1>"   [aadhaar]
@@ -231,11 +235,11 @@ A few properties worth stating plainly:
 
 ### What is not redacted
 
-Redaction is scoped to what detection found, which means the gaps measured in `eval/` are also a direct measure of what still leaks. Nothing recognises a person's name, a Hindi-labelled field, or a bank account number with no check digit, so those pass through in plain text.
+Redaction is scoped to what detection found, which means the gaps measured in `eval/` are close to a measure of what still leaks. `npm run eval` does **not** run the NER model (that needs a browser and a weight download), so names in prose still show as misses in the harness even though a live Analyze click will try to catch English ones. Hindi names in running text, and a bank account number with no check digit, still pass through in plain text.
 
-Attribute *names* (`name`, `htmlId`) are also left alone, since selectors depend on them. And because `text` is truncated at 280 characters, a value straddling that boundary can leave a partial fragment behind.
+Sensitive `name`, `htmlId`, accessible-name, URL and label values are now scanned like visible text. Stable `element_N` ids—not page selectors—are used remotely. Truncated text is replaced by a one-way `<TRUNCATED_N>` token so truncation cannot expose half of an otherwise detectable secret.
 
-Turning **Reveal what was redacted** on in the popup shows the mapping so you can check the result. That list is display-only and never reachable from Copy JSON.
+The raw mapping is intentionally not exposed to the popup. It remains in the tab-scoped isolated world and can only be resolved locally when an approved placeholder is applied.
 
 ## 5. What DOM extraction cannot provide
 
@@ -252,20 +256,13 @@ Be explicit about this; later phases should not treat the snapshot as a full und
 - **Computed “intent” of the page.** The extractor does not know that a button *logs you in*; it only knows it is a button whose text is “Login”.
 - **Freshness after navigation.** The snapshot is a point-in-time copy. IDs persist on the current document until reload.
 
-## 6. What we are deliberately not implementing yet
+## Agent trust boundary
 
-See `ROADMAP.md` for the phased plan. Still out of scope:
+Local analysis mode performs no network request. Agent mode sends a compact redacted DOM snapshot to the local agent server. **Sanitized image + structured context** mode may also send a second, newly rendered JPEG containing padded black masks for secrets and faces. The original PNG, OCR text, content-script vault, passwords, OTPs, CVVs and authentication/session tokens are never accepted by network code.
 
-- LLM or vision language model, local or remote
-- Any backend, or network upload of page content or screenshots
-- Automatic clicking, typing, or form filling
-- A learned model for unstructured PII (person names, free-text addresses)
-- Automatic clicking or form filling driven by anything other than an explicit
-  placeholder de-reference
+Before `fetch`, `src/agent/protocol.js` requires `sanitized: true`, a redacted context, a sanitizer-branded image when image mode is selected, bounded payload size, and no raw-data fields. It also scans the outbound structure for exact and reformatted vault values while the vault is still available inside the content script. The server repeats structural validation and has no vault API.
 
-Already shipped, and no longer on this list: OCR, Transformers.js, ONNX
-Runtime, WebGPU, screenshots as model input, checksum-backed detection of
-structured identifiers, and placeholder redaction with a session vault.
+The server returns only a closed action vocabulary. Both server and extension reject unknown fields, ids and actions. Password/OTP/CVV/token fields cannot be filled. Submit, continue, send, purchase and delete actions require explicit user approval.
 
 ## How to test
 
@@ -273,15 +270,17 @@ structured identifiers, and placeholder redaction with a session vault.
 
 ```bash
 npm run eval
+npm run test:safety
+npm run test:server
+npx playwright install chromium # once, for browser automation
+npm run test:e2e
 ```
 
-Runs validator unit checks, regression assertions against the fixtures in `examples/`, and scored detection over a synthetic corpus, then compares the result against a committed baseline. Exits non-zero on any regression. See `eval/README.md`.
+`npm run eval` preserves the scored rule/DOM baseline. The safety suite covers leak gates, malformed model output, action bounds, credential refusal and placeholder handling. The server suite exercises request validation and the deterministic mock provider. The E2E suite launches the unpacked extension in test Chromium, creates a real sanitized screenshot with local YuNet/OCR, runs the mock agent and verifies that the password stays empty.
 
-Current baseline: 15 pages, 117 checks, precision 100%, recall 88.5%, F1 93.9%.
+Current baseline: 16 pages, rule-only scoring (the ONNX name model is not loaded here), precision 100%, recall in the high 80s, with every remaining miss a `person_name` on `unstructured-names.html` or `devanagari-names.html`. Those pages exist so the English-only checkpoint has a number to miss rather than a comment to hide behind. See `eval/README.md` for the recorded counts.
 
-Read that precision as "no *known* false positives". Every corpus page was hand-written by the same person who wrote the detector, so it tests the cases we thought of; it is a regression gate, not a measurement of real-world accuracy. All six remaining misses are `person_name` on `unstructured-names.html`, which is deliberate — the corpus had saturated at 100%, and a benchmark with no headroom cannot show whether Phase 6's NER model helped.
-
-This covers extraction and detection only. **Visibility is not exercised** — jsdom has no layout engine, so the harness stubs element boxes. Visibility, vision, and OCR need the manual checks below.
+The scored corpus remains deliberately separate from real-model measurements: its headline precision/recall/F1 describe deterministic DOM/value rules, not YuNet, OCR or NER. Real browser inference is exercised by `npm run test:e2e`; model-specific benchmark claims require a labelled pixel corpus and are not invented here.
 
 ### Manual
 
@@ -319,33 +318,36 @@ Open `examples/pii-values.html` and analyze with **Visible DOM**. The page is bu
 
 Expect **Identifier values found** to read 11 and **Checksum verified** to read 4.
 
-Then check the redaction: switch to **JSON** and confirm every detected value reads as a placeholder rather than a number. Press **Copy JSON**, paste it somewhere, and search it for `234567890124` — it must not be there. Finally tick **Reveal what was redacted** to see the mapping, and note that the password field in section F appears as a one-way placeholder with no recoverable value.
+Then check the redaction: switch to **JSON** and confirm every detected value reads as a placeholder rather than a number. Press **Copy JSON**, paste it somewhere, and search it for `234567890124` — it must not be there. The password field in section F appears only as a one-way placeholder with no recoverable value.
 
 ### SIH website
 
 Open the live SIH site, analyze with **Visible DOM**, and confirm old/hidden navigation links with `0 × 0` boxes no longer appear in the readable list or JSON `elements` array. They may still inflate **Total DOM elements found**. Then switch to **Current Viewport** and confirm the context shrinks to what is on screen.
 
-## Local vision layer (baseline)
+## Local vision layer
 
-YOLOS-Tiny is a **benchmark detector**, not the production privacy model. It answers: can a small object detector run inside this extension and return useful boxes?
+OpenCV YuNet is the production vision adapter. Its tiny face-specific model handles small and printed portraits better than the previous selfie-oriented BlazeFace adapter. `YolosTinyAdapter` remains available in the source tree as the reproducible Phase 2 benchmark.
 
 - **Where it runs:** an offscreen document (`src/offscreen/`), not the service worker and not the page.
 - **Screenshot:** `chrome.tabs.captureVisibleTab` from a button click. The PNG stays in memory and is passed to the offscreen host.
-- **Model:** `Xenova/yolos-tiny` through Transformers.js. Weights download once from Hugging Face and are cached. Inference is on-device.
-- **Backend:** WebGPU when the pipeline loads; WASM (`q8`) if WebGPU fails.
-- **Swap later:** `VisionEngine` + `ModelAdapter`. `YolosTinyAdapter` is wired; `YoloAdapter` is a stub for YOLOv10.
-- **OCR:** optional Tesseract.js experiment, same offscreen host, off by default.
-- **Hybrid rules:** deterministic. Password/email/buttons are DOM. Images/canvas/video may need vision. The baseline still runs on the full screenshot so we can measure it.
-- **Not implemented:** continuous capture, server LLM/VLM, auto-click, redaction.
+- **Model:** OpenCV YuNet 2023mar, a roughly 232 KB ONNX model packaged into `vendor/vision` by `npm run build`.
+- **Backend:** ONNX Runtime Web on local WASM/CPU, shared with the NER stack.
+- **Adapter boundary:** `VisionEngine` + `ModelAdapter`. `YuNetFaceAdapter` is the default; `YolosTinyAdapter` remains the benchmark and `YoloAdapter` is a stub.
+- **OCR:** Tesseract.js in the same offscreen host. Screen analysis enables it
+  automatically when the viewport DOM contains an image, canvas, or video.
+  **Always run local OCR** is an override for pixel surfaces the DOM cannot
+  identify, such as CSS background images or inaccessible frames.
+- **Hybrid rules:** deterministic. Password/email/buttons are DOM. Images/canvas/video may need vision. Face detection runs on the full visible screenshot.
+- **Outbound sanitizer:** a new canvas black-boxes structured/OCR secrets and faces with padding. The sanitizer also supports pixelation, but the extension defaults to the clearer black mask. Only its branded JPEG may enter image-mode network code.
 
 ### How to test vision
 
 1. `npm install` then reload the unpacked extension.
 2. Open `examples/vision-benchmark.html`.
-3. Wait until the popup shows **Vision model: Ready** (first load can take a minute).
-4. Click **Analyze current screen**.
-5. Confirm boxes on the screenshot, metrics (backend, load ms, inference ms), and the DOM vs vision table.
-6. Optionally enable **Also run local OCR** and repeat on Test F / Test G.
+3. Click **Analyze current screen** (the packaged face model loads on demand).
+4. Confirm boxes on the screenshot, metrics (backend, load ms, inference ms), and the DOM vs vision table.
+5. OCR should run automatically on Test F / Test G. Enable **Always run local
+   OCR** to test the manual override.
 
 Expected direction of results (not accuracy scores):
 
@@ -353,7 +355,7 @@ Expected direction of results (not accuracy scores):
 | --- | --- | --- |
 | Password field | YES | NO |
 | Email input | YES | MAYBE (OCR on pixels) |
-| Face / person in a photo | NO (image tag only) | YES if YOLOS reports `person` |
+| Face in a photo | NO (image tag only) | YES if YuNet finds a face |
 | Email painted in an image | NO | YES with OCR |
 | Canvas text | tag only | YES with OCR |
 | Normal button | YES | NO |
@@ -362,13 +364,62 @@ Expected direction of results (not accuracy scores):
 
 Each run stores model, backend, image size, model load time, inference time, detection count, and confidences. We do not invent precision/recall here.
 
+## Agent server
+
+The extension defaults to `http://127.0.0.1:4317/agent`. Start the offline deterministic provider:
+
+```bash
+npm run server
+```
+
+No API key is needed. For an OpenAI-compatible local deployment (Ollama, vLLM or LM Studio) or cloud provider, configure the **server process**, never the extension:
+
+```bash
+AGENT_PROVIDER=openai
+AGENT_ENDPOINT=http://127.0.0.1:1234/v1/chat/completions
+AGENT_MODEL=your-model
+AGENT_API_KEY=optional-for-local-hosts
+AGENT_IMAGE_ENABLED=true
+npm run server
+```
+
+Cloud use follows the same variables with an HTTPS endpoint and key. Only already-sanitized input reaches that provider. `AGENT_ALLOWED_ORIGINS` can be a comma-separated extension-origin allowlist for a fixed demo installation. The server exposes `GET /health` and validated `POST /agent`; request bodies default to a 6 MB maximum and provider calls time out.
+
+## Reproducible SIH demonstration
+
+1. Run `npm install`, `npm run build`, and `npm run server`.
+2. Load/reload this folder at `chrome://extensions` and enable file access only if opening examples through `file://`.
+3. Open `http://127.0.0.1:4317/demo/sih-demo.html`.
+4. Open the extension. Optionally run **Analyze current screen** to show face/OCR/PII detection and the truly sanitized preview.
+5. Use goal: “Fill the contact form using the approved email placeholder, choose Student and continue, but do not fill or reveal the password.”
+6. Select **Hybrid DOM + local vision**, enable the submit/continue confirmation, and run.
+7. Confirm the privacy summary, redacted context, validated action log and latency stages. The page ends at **Demo complete** and the password remains empty.
+
+The generated participant portrait and every identifier in the page are synthetic demonstration fixtures.
+
+## Threat model
+
+- **Malicious page / prompt injection:** page text is explicitly untrusted data; it cannot expand the action vocabulary, supply selectors/URLs/code, or override the system policy.
+- **Accidental PII leakage:** rules, checksums, local NER/OCR/vision, one-way credential tokens, screenshot masks and two mechanical payload gates reduce risk. Detection is imperfect, so this is not a claim of anonymity or zero leakage.
+- **Malicious model output:** strict parsing rejects unknown keys/actions, stale or unknown ids, oversized replies, excessive waits/scrolls, credential fills and unapproved destructive controls.
+- **Stale DOM:** every turn extracts a fresh snapshot; application fails closed when its `element_N` no longer exists.
+- **Logs:** progress records categories, ids, counts and timings only. Raw values, OCR text, screenshots and vault contents are not logged.
+- **Network/provider:** HTTPS protects cloud transport; a third-party provider can retain sanitized data under its own policy. Prefer the local mock or self-hosted model for the strongest boundary.
+- **Detection limits:** cross-origin frames, closed shadow DOM, unusual scripts/languages, low-quality OCR and novel identifiers can still evade detection.
+
+## Browser compatibility
+
+Chrome and Edge Manifest V3 are the supported targets. Automated Chromium coverage loads the unpacked extension. Firefox is **not claimed as supported**: `chrome.offscreen`, `captureVisibleTab` permission behavior and MV3 service-worker differences require a hidden-page/background compatibility target that is not implemented or tested.
+
 ### Known limitations
 
-- YOLOS is COCO object detection. It does not classify PII, faces vs bodies, or ID cards.
-- Full-screenshot inference is the baseline, not the final region-based design.
-- First model load needs network for weights only. Later loads should use the cache.
-- Popup close does not stop a load already running in the offscreen document.
-- OCR is slow on large screenshots; keep it optional.
+- YuNet detects faces, not identity, full bodies, ID-card type, or document boundaries.
+- YuNet runs once on the full screenshot, then retries a miss with overlapping regions on large captures.
+- The face model is packaged locally; the English NER checkpoint still downloads on first use.
+- Stop cancels the active server request, but it cannot interrupt a synchronous model pass already running in the offscreen document.
+- OCR is slower on large screenshots and supports English text in the packaged build.
+- Indic/Devanagari person-name recall remains measured at 0% in the rule-only corpus; a browser-sized multilingual NER replacement is not shipped.
+- Browser heap reporting is optional and displayed only as an estimate when Chromium exposes it.
 
 ## Project layout
 
@@ -378,9 +429,12 @@ browser_based_agent/
 ├── package.json
 ├── README.md
 ├── scripts/build-vision.mjs
+├── server/          (privacy gateway, mock and OpenAI-compatible providers)
 ├── ROADMAP.md
 ├── eval/            (npm run eval: corpus, labels, baseline, checks)
+├── test/            (safety, server and unpacked-extension integration)
 ├── examples/
+│   ├── sih-demo.html
 │   ├── sample-page.html
 │   ├── visibility-test.html
 │   ├── vision-benchmark.html
@@ -391,7 +445,13 @@ browser_based_agent/
 │   ├── content/
 │   ├── models/
 │   ├── offscreen/
+│   ├── nlp/
+│   │   ├── NerEngine.js
+│   │   ├── chunk.js
+│   │   ├── entities.js
+│   │   └── adapters/
 │   ├── popup/
+│   ├── privacy/sanitizer.js
 │   ├── utils/
 │   └── vision/
 │       ├── VisionEngine.js
@@ -401,8 +461,4 @@ browser_based_agent/
 └── vendor/          (created by npm run build)
 ```
 
-The DOM extractor remains vanilla JavaScript. Only the offscreen vision host is bundled.
-
-#   S I H 
- 
- 
+The DOM extractor remains vanilla JavaScript. Only the offscreen host (vision, OCR, NER) is bundled.

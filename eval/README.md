@@ -22,8 +22,18 @@ logic in `src/utils/visibility.js` is *bypassed rather than tested*. Visibility
 stays covered by the manual browser fixtures in `examples/`. **Do not read a
 passing eval run as evidence that visibility filtering works.**
 
-Also not measured: the vision and OCR layers, which need a real browser with
-WebGPU or WASM.
+Also not scored here: the YuNet, OCR, and **ONNX NER** layers. Those need a real
+browser with WASM and, for NER, a first-run weight download. `checks/ner.mjs`
+covers the code around the model (grouping, chunking, splicing placeholders)
+using synthetic spans. Corpus scores therefore stay rule-only: names in prose
+are expected misses here.
+
+Keep the metric families separate:
+
+- `npm run eval` reports per-category precision/recall/F1 for deterministic DOM and validator detection.
+- `npm run test:safety` tests normalized OCR/vision metadata, outbound redaction gates and action refusal without loading weights.
+- `npm run test:e2e` runs real YuNet and Tesseract inference, verifies creation of a sanitizer-branded image, then completes the mock-server demo.
+- A labelled face/OCR pixel corpus is still required before reporting face precision/recall, OCR-derived PII F1, region IoU, over-redaction or sensitive-pixel coverage. The UI reports timings and mask counts, not invented accuracy.
 
 ## Layout
 
@@ -39,7 +49,8 @@ eval/
 │   ├── validators.mjs unit checks for the checksum and format validators
 │   ├── keywords.mjs   word-sense checks for the catalog patterns
 │   ├── regression.mjs assertions against the examples/ fixtures
-│   └── redaction.mjs  the safe-snapshot contract
+│   ├── redaction.mjs  the safe-snapshot contract
+│   └── ner.mjs        grouping, chunking, and applyEntities (no weight download)
 ├── corpus/*.html      synthetic pages
 └── labels/*.json      ground truth, one file per page
 ```
@@ -138,23 +149,21 @@ page's `note`.
 
 ## Baseline, as recorded
 
-15 pages, 46 true positives, 0 false positives, 6 misses. Overall precision
-100%, recall 88.5%, F1 93.9%.
+16 pages, 46 true positives, 0 false positives, 10 misses. Overall precision
+100%. All ten misses are `person_name`: six English names in
+`unstructured-names.html` and four Devanagari names in
+`devanagari-names.html`. The harness does not load the NER model, so those
+remain expected misses here. The Devanagari page is also expected to miss in
+the browser — that is the measured cost of the English-only
+`onnx-community/distilbert-NER-ONNX` checkpoint.
 
 **Read that precision with suspicion.** Every page here was hand-written by the
 same person who wrote the detector, so the corpus tests the cases we thought
 of. It is a regression gate, not evidence of real-world accuracy, and the
 honest claim is "no known false positives", not "no false positives".
 
-All six misses are one category. `person_name` sits at 0% recall by design:
-`unstructured-names.html` was added *because* the rest of the corpus had
-saturated at 100%, and a benchmark with no headroom cannot show whether Phase 6
-helped. Those labels carry no confidence token, since which one a model reports
-is Phase 6's decision.
-
-Note that `person_name` prints `n/a` for precision rather than 100%. Precision
-over zero predictions is undefined, and printing a perfect score for a detector
-that never fires reads as the opposite of the truth.
+`person_name` prints `n/a` for precision rather than 100%. Precision over zero
+predictions is undefined.
 
 The gaps fixed in the last pass, kept here because the corpus still contains
 the pages that caught them:

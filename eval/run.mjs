@@ -20,6 +20,8 @@ import * as validatorChecks from "./checks/validators.mjs";
 import * as keywordChecks from "./checks/keywords.mjs";
 import * as regressionChecks from "./checks/regression.mjs";
 import * as redactionChecks from "./checks/redaction.mjs";
+import * as nerChecks from "./checks/ner.mjs";
+import * as visionChecks from "./checks/vision.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -92,6 +94,14 @@ const regressionOk = reportChecker(regressionChecker);
 const redactionChecker = createChecker("redaction");
 redactionChecks.run(root, redactionChecker);
 const redactionOk = reportChecker(redactionChecker);
+
+const nerChecker = createChecker("ner");
+nerChecks.run(root, nerChecker);
+const nerOk = reportChecker(nerChecker);
+
+const visionChecker = createChecker("vision");
+visionChecks.run(utils, visionChecker);
+const visionOk = reportChecker(visionChecker);
 
 /* ------------------------------------------------------------------ *
  * 2. Corpus scoring
@@ -211,6 +221,8 @@ const failed =
   !keywordsOk ||
   !regressionOk ||
   !redactionOk ||
+  !nerOk ||
+  !visionOk ||
   unlabelled > 0 ||
   unkeyedTotal > 0 ||
   (!update && comparison.status === "regressed");

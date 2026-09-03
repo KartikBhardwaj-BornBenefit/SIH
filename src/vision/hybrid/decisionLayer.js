@@ -32,6 +32,66 @@ function ocrLooksLikeEmail(ocrResult) {
   return /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text);
 }
 
+function pixelSurfaces(domSnapshot) {
+  var elements = (domSnapshot && domSnapshot.elements) || [];
+  var found = [];
+
+  elements.forEach(function (el) {
+    var tag = String(el.tag || "").toLowerCase();
+    var kind = String(el.kind || "").toLowerCase();
+    if (
+      (tag === "img" || kind === "image") &&
+      found.indexOf("image") === -1
+    ) {
+      found.push("image");
+    }
+    if (
+      (tag === "canvas" || kind === "canvas") &&
+      found.indexOf("canvas") === -1
+    ) {
+      found.push("canvas");
+    }
+    if (
+      (tag === "video" || kind === "video") &&
+      found.indexOf("video") === -1
+    ) {
+      found.push("video");
+    }
+  });
+
+  return found;
+}
+
+/**
+ * OCR is expensive, so run it automatically only when the viewport snapshot
+ * contains pixels the DOM cannot read. The override covers CSS backgrounds,
+ * inaccessible frames, and other surfaces absent from the snapshot.
+ */
+function planOcr(domSnapshot, forceOcr) {
+  var surfaces = pixelSurfaces(domSnapshot);
+  var snapshotUnavailable = !domSnapshot;
+  var run = Boolean(forceOcr || snapshotUnavailable || surfaces.length);
+  var mode = forceOcr ? "forced" : (run ? "automatic" : "skipped");
+  var reason;
+
+  if (forceOcr) {
+    reason = "OCR was explicitly requested for the full visible screen.";
+  } else if (snapshotUnavailable) {
+    reason = "OCR ran because DOM inspection was unavailable.";
+  } else if (surfaces.length) {
+    reason = "OCR ran because the viewport contains " + surfaces.join("/") + " pixels.";
+  } else {
+    reason = "OCR was skipped because the DOM found no image, canvas, or video pixels.";
+  }
+
+  return {
+    run: run,
+    mode: mode,
+    surfaces: surfaces,
+    reason: reason
+  };
+}
+
 function decide(domSnapshot, visionResult, ocrResult) {
   var elements = (domSnapshot && domSnapshot.elements) || [];
   var reasons = [];
@@ -88,8 +148,11 @@ function decide(domSnapshot, visionResult, ocrResult) {
     {
       signal: "Person / face",
       dom: "NO",
-      vision: visionHasLabel(visionResult, "person") ? "YES" : "NO",
-      note: "YOLOS reports COCO class 'person', not a dedicated face/PII model."
+      vision:
+        visionHasLabel(visionResult, "face") || visionHasLabel(visionResult, "person")
+          ? "YES"
+          : "NO",
+      note: "YuNet is purpose-built for small faces; YOLOS remains only as a benchmark adapter."
     },
     {
       signal: "Image / embedded pixels",
@@ -120,7 +183,9 @@ function decide(domSnapshot, visionResult, ocrResult) {
 }
 
 BrowserAgent.hybrid = {
-  decide: decide
+  decide: decide,
+  pixelSurfaces: pixelSurfaces,
+  planOcr: planOcr
 };
 
 globalThis.BrowserAgent = BrowserAgent;

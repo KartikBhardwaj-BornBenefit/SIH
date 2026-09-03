@@ -67,6 +67,27 @@ export function run(BA, t) {
     ["payment_card"]
   );
   t.eq(
+    "synthetic JWT-shaped token is treated as an authentication secret",
+    V.findValues(
+      "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vLXVzZXIifQ.synthetic_signature",
+      policy,
+      {}
+    ).map((f) => f.category),
+    ["authentication_secret"]
+  );
+  t.eq(
+    "labelled access token is treated as an authentication secret",
+    V.findValues("access_token=synthetic_demo_token_123", policy, {}).map((f) => f.category),
+    ["authentication_secret"]
+  );
+  t.eq(
+    "labelled credentials in prose are one-way categories",
+    V.findValues("password: syntheticSecret OTP is 123456 CVV=123", policy, {}).map(
+      (f) => f.category
+    ).sort(),
+    ["cvv", "otp", "password"]
+  );
+  t.eq(
     "landline is not a mobile",
     V.findValues("call 0224 5678901", policy, {}).length,
     0

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Privacy-Preserving Browser Agent",
-  "version": "0.5.0",
-  "description": "Local DOM extraction with checksum-verified identifier detection, plus an on-device vision baseline. Screenshots are never uploaded.",
+  "version": "0.7.0",
+  "description": "Redacts identifiers on-device, sends only placeholders plus your instruction to a server model, and applies the returned actions in the tab.",
   "action": {
     "default_title": "Analyze current page",
     "default_popup": "src/popup/popup.html",
@@ -27,7 +27,8 @@
     "https://huggingface.co/*",
     "https://*.huggingface.co/*",
     "https://*.hf.co/*",
-    "https://tessdata.projectnaptha.com/*"
+    "http://127.0.0.1/*",
+    "http://localhost/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
