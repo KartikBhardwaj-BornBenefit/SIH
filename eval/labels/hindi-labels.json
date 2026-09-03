@@ -1,0 +1,11 @@
+{
+  "note": "Values are language independent and were always found. The two empty fields were labelled as expected hits while the catalog was English-only, so the localisation gap showed up as a real miss rather than hiding in a comment; Phase 8 added Devanagari keywords and they now pass. hl-l2 flags because a label describes the control beside it and email is not fieldOnly — the same convention checkout-empty.html uses for \"Street address\". hl-l1 does not flag: aadhaar is fieldOnly, so its label is not a field. Both inputs carry romanised name attributes (ah_sankhya, dak_pata) that no pattern matches, so the Devanagari label text is doing the work. dak_pata literally means postal address, and the fact that hl-5 is email-only confirms the catalog reads the label rather than the name.",
+  "expect": {
+    "hl-1": ["aadhaar/value/checksum"],
+    "hl-2": ["email/value/structure"],
+    "hl-3": ["phone/value/structure"],
+    "hl-l2": ["email/field-purpose"],
+    "hl-4": ["aadhaar/field-purpose"],
+    "hl-5": ["email/field-purpose"]
+  }
+}

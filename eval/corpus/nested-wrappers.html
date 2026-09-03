@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Nested wrappers</title>
+  </head>
+  <body>
+    <h1>Nested wrappers</h1>
+    <p>
+      One identifier wrapped in four layers of markup. Only the innermost
+      element owns the text, so exactly one flag is expected — no wrapper may
+      report its child's identifier.
+    </p>
+
+    <div id="nw-1">
+      <div id="nw-2">
+        <div id="nw-3">
+          <span id="nw-4">asha.menon@example.com</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="nw-mixed">
+      Contact:
+      <span id="nw-inner">7890 1234 5674</span>
+    </div>
+  </body>
+</html>

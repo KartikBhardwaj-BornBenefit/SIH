@@ -1,0 +1,7 @@
+{
+  "note": "IFSC and UPI are verifiable. The raw account number is not: it carries no check digit, so #bs-1 is a known limitation rather than a labelled miss. A masked card, a balance and a transaction reference must all stay clean.",
+  "expect": {
+    "bs-2": ["bank_account/value/structure"],
+    "bs-3": ["upi/value/structure"]
+  }
+}

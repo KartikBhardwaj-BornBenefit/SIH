@@ -1,0 +1,8 @@
+{
+  "note": "Contact details in spans. #sp-1 is a person name with no detectable shape and is a known limitation for the NER phase, not a labelled miss. Role, city and join date must stay clean.",
+  "expect": {
+    "sp-3": ["email/value/structure"],
+    "sp-4": ["phone/value/structure"],
+    "sp-5": ["upi/value/structure"]
+  }
+}

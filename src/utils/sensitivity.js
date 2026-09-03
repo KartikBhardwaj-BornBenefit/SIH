@@ -1,7 +1,18 @@
 /**
  * Policy-driven sensitivity classifier.
  *
- * Matches DOM attributes against the enabled categories in the popup form.
+ * Two independent questions, reported separately so we can tell why an
+ * element was flagged:
+ *
+ *   field purpose — does this control *ask* for sensitive data? Keyword and
+ *                   attribute matching against the enabled catalog entries.
+ *   value         — does this text *contain* a sensitive identifier? Format
+ *                   and checksum validation in utils/validators.js.
+ *
+ * Field purpose alone misses the common case: PII that has already been
+ * submitted and is now rendered as ordinary page text. Value detection alone
+ * misses empty forms. We need both.
+ *
  * Vision/OCR hits are annotated separately with annotatePixelSensitivity().
  */
 var BrowserAgent = globalThis.BrowserAgent || {};
@@ -64,8 +75,58 @@ function strongerLevel(current, next) {
   return "unknown";
 }
 
-function classifySensitivity(element, extraText, policy) {
+function catalogIndex() {
+  var byId = {};
+  (BrowserAgent.SENSITIVITY_CATEGORIES || []).forEach(function (category) {
+    byId[category.id] = category;
+  });
+  return byId;
+}
+
+/**
+ * Read a control's current value so it can be scanned for identifiers.
+ *
+ * The value is used and discarded inside this module. Callers only ever see
+ * a category and a confidence — never the string, its offset, or its length.
+ * Password fields are skipped: field purpose already flags them, and there
+ * is nothing to gain by inspecting the secret.
+ */
+function readControlValue(element) {
+  var tag = element.tagName.toLowerCase();
+  var type = (element.getAttribute("type") || "").toLowerCase();
+  if (type === "password") {
+    return "";
+  }
+  if (tag === "select") {
+    var option = element.options && element.options[element.selectedIndex];
+    return option ? String(option.text || "") : "";
+  }
+  if (element.value != null) {
+    return String(element.value);
+  }
+  if (element.isContentEditable) {
+    return String(element.textContent || "");
+  }
+  return "";
+}
+
+/**
+ * @param {Element} element
+ * @param {string} extraText Accessible name, folded into the keyword haystack.
+ * @param {object} policy Sensitivity policy from the popup.
+ * @param {object} [options]
+ * @param {string} [options.text] Rendered text of the element, scanned for
+ *   identifier values. Offsets in the result index into this string.
+ * @param {boolean} [options.hasUserValue] Whether the control currently holds
+ *   a user-entered value worth scanning.
+ * @param {string} [options.nearbyText] Text of the preceding sibling. Used
+ *   only to corroborate low-confidence shapes such as a voter id, never for
+ *   keyword matching — a paragraph must not inherit its neighbour's meaning.
+ */
+function classifySensitivity(element, extraText, policy, options) {
   var catalog = BrowserAgent.SENSITIVITY_CATEGORIES || [];
+  var byId = catalogIndex();
+  var validators = BrowserAgent.validators;
   policy = BrowserAgent.normalizeSensitivityPolicy
     ? BrowserAgent.normalizeSensitivityPolicy(policy)
     : policy || {};
@@ -83,9 +144,29 @@ function classifySensitivity(element, extraText, policy) {
     isField: isField
   };
 
+  var opts = options || {};
   var categories = [];
+  var signals = [];
   var level = "unknown";
 
+  function record(categoryId, via, confidence, start, length) {
+    var category = byId[categoryId];
+    if (!category) {
+      return;
+    }
+    var signal = { category: categoryId, via: via, confidence: confidence };
+    if (start != null) {
+      signal.start = start;
+      signal.length = length;
+    }
+    signals.push(signal);
+    if (categories.indexOf(categoryId) === -1) {
+      categories.push(categoryId);
+    }
+    level = strongerLevel(level, category.level);
+  }
+
+  // 1. Field purpose. Unchanged behaviour: keywords, input types, autocomplete.
   catalog.forEach(function (category) {
     if (!policy[category.id]) {
       return;
@@ -93,27 +174,47 @@ function classifySensitivity(element, extraText, policy) {
     if (!categoryMatchesDom(category, ctx)) {
       return;
     }
-    categories.push(category.id);
-    level = strongerLevel(level, category.level);
+    record(category.id, "field-purpose", "keyword");
   });
+
+  if (!validators) {
+    return {
+      sensitivity: level,
+      sensitivityCategories: categories,
+      sensitivitySignals: signals
+    };
+  }
+
+  // Corroboration is deliberately wider than the keyword haystack: a value
+  // in a <dd> is often only identifiable from the <dt> beside it, but that
+  // neighbouring text must not make the <dd> itself match a category.
+  var corroborationText = haystack + " " + (opts.nearbyText || "");
+
+  // 2. Identifier values in text the page renders. Offsets are kept so Phase 5
+  //    can replace just the substring rather than masking the whole element.
+  if (opts.text) {
+    validators
+      .findValues(opts.text, policy, { corroborationText: corroborationText })
+      .forEach(function (hit) {
+        record(hit.category, "value", hit.confidence, hit.start, hit.length);
+      });
+  }
+
+  // 3. Identifier values the user typed. No offsets: a filled sensitive field
+  //    gets masked whole, so position and length are not needed.
+  if (isField && opts.hasUserValue) {
+    validators
+      .scanControlValue(readControlValue(element), policy, corroborationText)
+      .forEach(function (hit) {
+        record(hit.category, "control-value", hit.confidence);
+      });
+  }
 
   return {
     sensitivity: level,
-    sensitivityCategories: categories
+    sensitivityCategories: categories,
+    sensitivitySignals: signals
   };
-}
-
-function textMatchesCategory(category, text) {
-  if (!text) {
-    return false;
-  }
-  if (category.id === "email") {
-    return /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text);
-  }
-  if (category.id === "phone") {
-    return /(\+?\d[\d\s\-()]{8,}\d)/.test(text);
-  }
-  return matchesAny(text, category.patterns);
 }
 
 function annotatePixelSensitivity(vision, ocr, snapshot, policy) {
@@ -156,15 +257,21 @@ function annotatePixelSensitivity(vision, ocr, snapshot, policy) {
       cats.push("canvas_text");
       level = strongerLevel(level, "potentially_sensitive");
     }
-    ["email", "phone", "aadhaar", "pan", "passport", "bank_account"].forEach(function (id) {
-      if (!policy[id] || !catalogById[id]) {
-        return;
-      }
-      if (textMatchesCategory(catalogById[id], item.text || "")) {
-        cats.push(id);
-        level = strongerLevel(level, catalogById[id].level);
-      }
-    });
+    // Same validator layer the DOM path uses, so an Aadhaar number read off
+    // pixels is held to the same checksum as one read out of the DOM. No
+    // corroboration text is available here, so "shape"-only matchers
+    // (voter id, passport) stay silent by design.
+    if (BrowserAgent.validators) {
+      BrowserAgent.validators
+        .findValues(item.text || "", policy, { offsets: false })
+        .forEach(function (hit) {
+          if (cats.indexOf(hit.category) === -1) {
+            cats.push(hit.category);
+          }
+          var category = catalogById[hit.category];
+          level = strongerLevel(level, category ? category.level : "potentially_sensitive");
+        });
+    }
     copy.sensitivityCategories = cats;
     copy.sensitivity = level;
     return copy;
@@ -178,7 +285,10 @@ function annotatePixelSensitivity(vision, ocr, snapshot, policy) {
 
 BrowserAgent.sensitivity = {
   classifySensitivity: classifySensitivity,
-  annotatePixelSensitivity: annotatePixelSensitivity
+  annotatePixelSensitivity: annotatePixelSensitivity,
+  // Exported so the redaction pass can read a control's value through the
+  // same password guard rather than reimplementing it.
+  readControlValue: readControlValue
 };
 
 globalThis.BrowserAgent = BrowserAgent;

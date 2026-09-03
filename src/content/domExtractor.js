@@ -38,6 +38,34 @@ var RELEVANT_SELECTOR = [
   "[role='img']"
 ].join(",");
 
+/**
+ * Containers that commonly display already-submitted data but are far too
+ * common to include in the agent context wholesale. These are scanned for
+ * identifier values only, and admitted to `elements` solely when something
+ * is actually found. Rendered PII usually lives here rather than in the
+ * interactive elements RELEVANT_SELECTOR collects.
+ */
+var VALUE_TEXT_SELECTOR = [
+  "div",
+  "span",
+  "dd",
+  "dt",
+  "td",
+  "th",
+  "li",
+  "figcaption",
+  "address",
+  "output",
+  "blockquote",
+  "pre",
+  "code",
+  "small",
+  "strong",
+  "em",
+  "b",
+  "i"
+].join(",");
+
 var INTERACTIVE_ROLES = {
   button: true,
   link: true,
@@ -112,6 +140,20 @@ function inferNearbyLabel(element) {
   return "";
 }
 
+/**
+ * True for elements that have no text of their own and therefore take their
+ * accessible name from nearby markup — form controls and contenteditable
+ * hosts. A heading, paragraph, cell, or label owns its text and must not
+ * borrow a neighbour's.
+ */
+function takesNameFromContext(element) {
+  var tag = element.tagName.toLowerCase();
+  if (tag === "input" || tag === "select" || tag === "textarea") {
+    return true;
+  }
+  return Boolean(element.isContentEditable);
+}
+
 function getAccessibleName(element) {
   var text = BrowserAgent.text;
   var tag = element.tagName.toLowerCase();
@@ -140,9 +182,16 @@ function getAccessibleName(element) {
     }
   }
 
-  var nearby = inferNearbyLabel(element);
-  if (nearby) {
-    return text.truncateText(nearby);
+  // Only a form control borrows its name from surrounding markup. Applying
+  // this to text elements made a paragraph inherit the preceding heading's
+  // text as its own name, which both mislabelled `text` and fed the wrong
+  // words to keyword matching — a paragraph after an "Email address" heading
+  // was itself flagged as an email field. Anything with its own text uses it.
+  if (takesNameFromContext(element)) {
+    var nearby = inferNearbyLabel(element);
+    if (nearby) {
+      return text.truncateText(nearby);
+    }
   }
 
   var alt = element.getAttribute("alt");
@@ -379,6 +428,74 @@ function controlHasUserValue(element) {
   return true;
 }
 
+/**
+ * Text this element contributes itself, from its immediate child text nodes
+ * only. Descendant text belongs to the descendant.
+ *
+ * Using direct text rather than innerText matters for three reasons: each
+ * text node is scanned exactly once no matter how deeply nested, a wrapper
+ * and its child cannot both report the same identifier, and we avoid forcing
+ * layout on every candidate.
+ *
+ * The trade-off is that a value split across inline elements
+ * (`<span>2345</span><span>6789 0124</span>`) is not seen as one value.
+ *
+ * Offsets reported against this string are reproducible: a later phase can
+ * recompute it from the live DOM, so the snapshot never has to carry the text
+ * just to locate a redaction.
+ */
+function directText(element) {
+  var parts = [];
+  var nodes = element.childNodes;
+  for (var i = 0; i < nodes.length; i++) {
+    if (nodes[i].nodeType === 3) {
+      parts.push(nodes[i].nodeValue);
+    }
+  }
+  if (!parts.length) {
+    return "";
+  }
+  var raw = BrowserAgent.text.normalizeText(parts.join(" "));
+  var limit = BrowserAgent.validators ? BrowserAgent.validators.MAX_SCAN_LENGTH : 4000;
+  return raw.length > limit ? raw.slice(0, limit) : raw;
+}
+
+function renderedTextFor(element) {
+  var tag = element.tagName.toLowerCase();
+  if (tag === "input" || tag === "select" || tag === "textarea") {
+    return "";
+  }
+  return directText(element);
+}
+
+/**
+ * The string to scan for identifier values.
+ *
+ * This must be the string that ends up in the snapshot, not merely the one the
+ * element "owns". `text` is serialised from the accessible name, which for a
+ * text element folds in descendant content; scanning only direct child text
+ * nodes meant a value split across inline children — `<span>4561</span>
+ * <span>2378 9011</span>` — was reported as absent while the joined form was
+ * serialised anyway. Redaction re-scans and caught it regardless, so nothing
+ * leaked, but an element could be redacted while carrying no signal saying
+ * why. Scanning what we serialise keeps the two answers consistent, and keeps
+ * the signal offsets meaningful against the field they index into.
+ *
+ * Direct text is still preferred when it already covers the accessible name,
+ * so the common case neither changes nor pays for the longer string.
+ */
+function scannableTextFor(element, accessibleName) {
+  var own = renderedTextFor(element);
+  if (!accessibleName) {
+    return own;
+  }
+  var tag = element.tagName.toLowerCase();
+  if (tag === "input" || tag === "select" || tag === "textarea") {
+    return "";
+  }
+  return accessibleName.length > own.length ? accessibleName : own;
+}
+
 function extractElement(element, inViewport, policy) {
   var textUtil = BrowserAgent.text;
   var kind = classifyKind(element);
@@ -387,7 +504,12 @@ function extractElement(element, inViewport, policy) {
   var inputType = element.tagName.toLowerCase() === "input"
     ? (element.getAttribute("type") || "text").toLowerCase()
     : undefined;
-  var classified = BrowserAgent.sensitivity.classifySensitivity(element, accessibleName, policy);
+  var hasUserValue = controlHasUserValue(element);
+  var classified = BrowserAgent.sensitivity.classifySensitivity(element, accessibleName, policy, {
+    text: scannableTextFor(element, accessibleName),
+    hasUserValue: hasUserValue,
+    nearbyText: cheapNearbyText(element)
+  });
 
   var record = {
     id: agentId,
@@ -415,12 +537,28 @@ function extractElement(element, inViewport, policy) {
     disabled: isDisabled(element),
     boundingBox: BrowserAgent.visibility.getBoundingBox(element),
     viewportBox: BrowserAgent.visibility.getViewportBox(element),
-    hasUserValue: controlHasUserValue(element),
+    hasUserValue: hasUserValue,
     sensitivity: classified.sensitivity,
-    sensitivityCategories: classified.sensitivityCategories
+    sensitivityCategories: classified.sensitivityCategories,
+    sensitivitySignals: classified.sensitivitySignals
   };
 
   return textUtil.compactRecord(record);
+}
+
+/**
+ * Cheap label lookup for the second-pass pre-filter: the preceding sibling's
+ * own text. Covers the common "label then value" markup patterns —
+ * `<dt>`/`<dd>`, `<th>`/`<td>`, and a heading before a value — without
+ * forcing layout the way getAccessibleName can.
+ *
+ * extractElement later corroborates against the full accessible name, which
+ * is a superset of this, so the pre-filter never admits something the real
+ * classifier would reject.
+ */
+function cheapNearbyText(element) {
+  var prev = element.previousElementSibling;
+  return prev ? directText(prev) : "";
 }
 
 function isShortParagraph(element) {
@@ -488,9 +626,43 @@ function extractPage(options) {
     elements.push(extractElement(element, visibility.inViewport, policy));
   }
 
+  // Second pass. RELEVANT_SELECTOR is built around interactive and structural
+  // elements, but rendered PII usually sits in a div, span, td, or dd. Scan
+  // those for identifier values and admit one only when a value is actually
+  // found, so the agent context stays small.
+  var valueOnlyElements = 0;
+  if (BrowserAgent.validators) {
+    var textNodes = document.querySelectorAll(VALUE_TEXT_SELECTOR);
+    for (var t = 0; t < textNodes.length; t++) {
+      var candidate = textNodes[t];
+      if (seen.has(candidate)) {
+        continue;
+      }
+      var ownText = directText(candidate);
+      if (!ownText) {
+        continue;
+      }
+      var hits = BrowserAgent.validators.findValues(ownText, policy, {
+        corroborationText: ownText + " " + cheapNearbyText(candidate)
+      });
+      if (!hits.length) {
+        continue;
+      }
+      seen.add(candidate);
+      var textVisibility = BrowserAgent.visibility.classifyVisibility(candidate);
+      if (!passesModeFilter(textVisibility.visible, textVisibility.inViewport, mode)) {
+        continue;
+      }
+      elements.push(extractElement(candidate, textVisibility.inViewport, policy));
+      valueOnlyElements += 1;
+    }
+  }
+
   var interactiveInContext = 0;
   var sensitive = 0;
   var potentiallySensitive = 0;
+  var valueMatched = 0;
+  var checksumVerified = 0;
   for (var j = 0; j < elements.length; j++) {
     if (elements[j].interactive) {
       interactiveInContext += 1;
@@ -500,6 +672,23 @@ function extractPage(options) {
     }
     if (elements[j].sensitivity === "potentially_sensitive") {
       potentiallySensitive += 1;
+    }
+    var signals = elements[j].sensitivitySignals || [];
+    var hasValueSignal = false;
+    var hasChecksum = false;
+    for (var k = 0; k < signals.length; k++) {
+      if (signals[k].via === "value" || signals[k].via === "control-value") {
+        hasValueSignal = true;
+        if (signals[k].confidence === "checksum") {
+          hasChecksum = true;
+        }
+      }
+    }
+    if (hasValueSignal) {
+      valueMatched += 1;
+    }
+    if (hasChecksum) {
+      checksumVerified += 1;
     }
   }
 
@@ -535,7 +724,10 @@ function extractPage(options) {
       elements: elements.length,
       interactive: interactiveInContext,
       sensitive: sensitive,
-      potentiallySensitive: potentiallySensitive
+      potentiallySensitive: potentiallySensitive,
+      valueMatched: valueMatched,
+      checksumVerified: checksumVerified,
+      valueOnlyElements: valueOnlyElements
     },
     limits: {
       iframeCount: document.querySelectorAll("iframe").length,

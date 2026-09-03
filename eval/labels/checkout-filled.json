@@ -1,0 +1,8 @@
+{
+  "note": "Same form, filled. The card field should carry two independent signals: the field asks for a card, and the value it holds is Luhn-valid. CVV and expiry have no value matcher, so they stay purpose-only.",
+  "expect": {
+    "cf-1": ["payment_card/field-purpose", "payment_card/control-value/checksum"],
+    "cf-2": ["cvv/field-purpose"],
+    "cf-3": ["payment_card/field-purpose"]
+  }
+}

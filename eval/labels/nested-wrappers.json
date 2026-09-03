@@ -1,0 +1,7 @@
+{
+  "note": "Only the element that owns the text may report the identifier. If a wrapper also reports it, direct-text scanning has regressed into descendant scanning and every nested value would be double counted.",
+  "expect": {
+    "nw-4": ["email/value/structure"],
+    "nw-inner": ["aadhaar/value/checksum"]
+  }
+}

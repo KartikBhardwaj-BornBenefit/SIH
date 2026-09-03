@@ -1,0 +1,8 @@
+{
+  "note": "Values split across inline children. #isv-line was an expected failure while the classifier scanned only an element's own child text nodes: neither half is a complete identifier, so the paragraph reported nothing even though the joined form was serialised into its text field anyway. Nothing ever leaked, because redaction re-scans the serialised strings and replaced it regardless — but an element could be redacted while carrying no signal explaining why. Phase 8 made the classifier scan the string that actually gets serialised, so detection and redaction now agree. #isv-control and #isv-whole are the control pair and show the consequence: a container and its child both report the value, because the value really is present in both of their serialised text. They share one placeholder, so an agent sees one identifier rather than two.",
+  "expect": {
+    "isv-line": ["aadhaar/value/checksum"],
+    "isv-control": ["aadhaar/value/checksum"],
+    "isv-whole": ["aadhaar/value/checksum"]
+  }
+}

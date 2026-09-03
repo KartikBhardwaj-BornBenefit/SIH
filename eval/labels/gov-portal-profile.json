@@ -1,0 +1,10 @@
+{
+  "note": "Submitted government IDs rendered as text. Nothing here is a form field, so field-purpose matching should contribute nothing and every hit should come from a value.",
+  "expect": {
+    "gp-1": ["aadhaar/value/checksum"],
+    "gp-2": ["pan/value/structure"],
+    "gp-3": ["voter_id/value/shape"],
+    "gp-4": ["passport/value/shape"],
+    "gp-5": ["gstin/value/checksum"]
+  }
+}

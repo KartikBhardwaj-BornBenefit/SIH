@@ -470,6 +470,64 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.reveal-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reveal-toggle input {
+  accent-color: var(--accent);
+}
+
+.vault-panel {
+  margin: 8px 0 0;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.vault-caption {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.vault-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.vault-row:first-child {
+  border-top: 0;
+}
+
+.vault-key {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.vault-value {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.vault-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .page-card {
   padding: 11px 12px;
   border-radius: 12px;

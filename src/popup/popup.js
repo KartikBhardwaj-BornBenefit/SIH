@@ -18,8 +18,37 @@ var viewJson = document.getElementById("view-json");
 var copyJson = document.getElementById("copy-json");
 var copyLabel = document.getElementById("copy-label");
 var contextModeEl = document.getElementById("context-mode");
+var revealToggle = document.getElementById("reveal-values");
+var vaultPanelEl = document.getElementById("vault-panel");
+var vaultListEl = document.getElementById("vault-list");
+var vaultNoteEl = document.getElementById("vault-note");
 
 var latestSnapshot = null;
+var latestRedaction = null;
+
+/**
+ * Placeholder to original value, for the page as last analyzed.
+ *
+ * Held in this variable and nowhere else. The popup is destroyed whenever it
+ * loses focus, which takes this with it — there is no storage write, no
+ * logging, and no path from here into anything the user can copy. It exists
+ * only so the "Reveal" control can prove the redaction was correct.
+ */
+var sessionVault = null;
+
+function clearVault() {
+  sessionVault = null;
+  latestRedaction = null;
+  if (revealToggle) {
+    revealToggle.checked = false;
+  }
+  if (vaultListEl) {
+    vaultListEl.textContent = "";
+  }
+  if (vaultPanelEl) {
+    vaultPanelEl.hidden = true;
+  }
+}
 
 function setStatus(message, isError) {
   if (!message) {
@@ -60,6 +89,29 @@ function flagLabel(value) {
   return "";
 }
 
+/**
+ * "asks" means the control requests this data. "found" means we matched an
+ * actual identifier, and a tick means an arithmetic check digit passed.
+ */
+function signalLabel(signal) {
+  if (signal.via === "field-purpose") {
+    return signal.category + " asks";
+  }
+  var where = signal.via === "control-value" ? " in value" : " found";
+  return signal.category + where + (signal.confidence === "checksum" ? " ✓" : "");
+}
+
+function signalSummary(element) {
+  var signals = element.sensitivitySignals || [];
+  if (signals.length) {
+    return signals.map(signalLabel).join(", ");
+  }
+  if (element.sensitivityCategories && element.sensitivityCategories.length) {
+    return element.sensitivityCategories.join(", ");
+  }
+  return "";
+}
+
 function elementMeta(element) {
   var bits = [element.id];
   if (element.inputType) {
@@ -74,8 +126,9 @@ function elementMeta(element) {
   if (element.href) {
     bits.push(element.href);
   }
-  if (element.sensitivityCategories && element.sensitivityCategories.length) {
-    bits.push(element.sensitivityCategories.join(", "));
+  var summary = signalSummary(element);
+  if (summary) {
+    bits.push(summary);
   }
   return bits.join(" · ");
 }
@@ -156,6 +209,54 @@ function showJson() {
   viewJson.setAttribute("aria-selected", "true");
 }
 
+/**
+ * Render the placeholder-to-value mapping so the user can confirm the right
+ * things were redacted. This list is display-only; it is never part of the
+ * JSON view and never reachable from Copy JSON.
+ */
+function renderVault() {
+  if (!vaultPanelEl) {
+    return;
+  }
+  if (!revealToggle || !revealToggle.checked || !sessionVault) {
+    vaultPanelEl.hidden = true;
+    return;
+  }
+
+  vaultListEl.textContent = "";
+  var placeholders = Object.keys(sessionVault);
+  placeholders.forEach(function (placeholder) {
+    var row = node("div", "vault-row");
+    row.appendChild(node("code", "vault-key", placeholder));
+    row.appendChild(node("span", "vault-value", sessionVault[placeholder]));
+    vaultListEl.appendChild(row);
+  });
+
+  var oneWay = ((latestRedaction && latestRedaction.records) || []).filter(function (record) {
+    return record.oneWay;
+  });
+  var parts = [placeholders.length + " recoverable"];
+  if (oneWay.length) {
+    parts.push(oneWay.length + " one-way (credentials are never recoverable)");
+  }
+  if (!placeholders.length && !oneWay.length) {
+    parts = ["Nothing was redacted on this page."];
+  }
+  vaultNoteEl.textContent = parts.join(" · ");
+  vaultPanelEl.hidden = false;
+}
+
+function renderRedactionStats(snapshot) {
+  var counts = (snapshot && snapshot.redactionCounts) || {};
+  var replacedEl = document.getElementById("stat-redacted");
+  if (replacedEl) {
+    replacedEl.textContent = String(counts.replacements || 0);
+  }
+  if (revealToggle) {
+    revealToggle.disabled = !sessionVault || !Object.keys(sessionVault).length;
+  }
+}
+
 function renderSnapshot(snapshot) {
   latestSnapshot = snapshot;
   document.getElementById("count-elements").textContent = String(snapshot.counts.elements);
@@ -169,6 +270,14 @@ function renderSnapshot(snapshot) {
   document.getElementById("stat-interactive-visible").textContent = String(
     snapshot.counts.interactiveVisible || 0
   );
+  document.getElementById("stat-value-matched").textContent = String(
+    snapshot.counts.valueMatched || 0
+  );
+  document.getElementById("stat-checksum").textContent = String(
+    snapshot.counts.checksumVerified || 0
+  );
+  renderRedactionStats(snapshot);
+  renderVault();
   pageTitleEl.textContent = snapshot.page.title || "(untitled)";
   pageUrlEl.textContent = snapshot.page.url || "";
   pageFlagsEl.textContent =
@@ -194,6 +303,7 @@ function analyzeCurrentPage() {
   setStatus("Reading the current tab…");
   resultsEl.hidden = true;
   emptyEl.hidden = true;
+  clearVault();
 
   chrome.runtime.sendMessage(
     {
@@ -215,7 +325,15 @@ function analyzeCurrentPage() {
         return;
       }
 
-      setStatus("Snapshot created locally. Nothing was uploaded.");
+      sessionVault = response.vault || null;
+      latestRedaction = response.redaction || null;
+
+      var replaced = (latestRedaction && latestRedaction.counts.replacements) || 0;
+      setStatus(
+        replaced
+          ? "Snapshot created locally. " + replaced + " value(s) replaced with placeholders."
+          : "Snapshot created locally. Nothing was uploaded."
+      );
       renderSnapshot(response.snapshot);
       showReadable();
     }
@@ -225,6 +343,9 @@ function analyzeCurrentPage() {
 analyzeButton.addEventListener("click", analyzeCurrentPage);
 viewReadable.addEventListener("click", showReadable);
 viewJson.addEventListener("click", showJson);
+if (revealToggle) {
+  revealToggle.addEventListener("change", renderVault);
+}
 
 copyJson.addEventListener("click", function () {
   if (!latestSnapshot) {
@@ -313,43 +434,30 @@ function cssBoxToImage(box, imgWidth, imgHeight, viewport) {
   };
 }
 
-function isFormControl(element) {
-  var tag = element.tag || "";
-  var kind = element.kind || "";
-  return (
-    tag === "input" ||
-    tag === "textarea" ||
-    tag === "select" ||
-    kind === "input" ||
-    kind === "textarea" ||
-    kind === "select"
-  );
+/**
+ * The mask set is the redaction set.
+ *
+ * Masks used to be decided by their own rules, which meant the picture and
+ * the payload could disagree — the canvas could black out a field whose value
+ * was still sitting in the JSON, or leave one visible that had been replaced.
+ * Both now come from the records the redaction pass produced, so a masked
+ * region is exactly a region where something was replaced.
+ */
+function redactedElementIds() {
+  var ids = {};
+  ((latestRedaction && latestRedaction.records) || []).forEach(function (record) {
+    if (record.elementId) {
+      ids[record.elementId] = true;
+    }
+  });
+  return ids;
 }
 
-function shouldRedactElement(element) {
-  if (!element || !isFormControl(element)) {
+function shouldRedactElement(element, ids) {
+  if (!element || !element.id) {
     return false;
   }
-  var type = element.inputType || "";
-  if (
-    type === "hidden" ||
-    type === "submit" ||
-    type === "button" ||
-    type === "reset" ||
-    type === "image" ||
-    type === "file" ||
-    type === "checkbox" ||
-    type === "radio"
-  ) {
-    return false;
-  }
-  if (element.hasUserValue !== true) {
-    return false;
-  }
-  if (type === "password") {
-    return true;
-  }
-  return element.sensitivity === "sensitive" || element.sensitivity === "potentially_sensitive";
+  return Boolean(ids[element.id]);
 }
 
 function elementCssBox(element, viewport) {
@@ -368,7 +476,17 @@ function elementCssBox(element, viewport) {
   };
 }
 
+/**
+ * Label a mask with the placeholder that replaced the value, so the picture
+ * and the JSON name the same thing.
+ */
 function redactionLabel(element) {
+  var records = (latestRedaction && latestRedaction.records) || [];
+  for (var i = 0; i < records.length; i++) {
+    if (records[i].elementId === element.id) {
+      return records[i].placeholder;
+    }
+  }
   if (element.inputType === "password") {
     return "password hidden";
   }
@@ -427,8 +545,9 @@ function drawDetections(dataUrl, detections, ocrItems, snapshot) {
 
     var viewport = snapshot && snapshot.viewport;
     var masked = 0;
+    var redactedIds = redactedElementIds();
     ((snapshot && snapshot.elements) || []).forEach(function (element) {
-      if (!shouldRedactElement(element)) {
+      if (!shouldRedactElement(element, redactedIds)) {
         return;
       }
       var cssBox = elementCssBox(element, viewport);
@@ -500,9 +619,12 @@ function renderVision(payload) {
     "inference " + (vision.inferenceTimeMs != null ? vision.inferenceTimeMs + " ms" : "n/a"),
     (vision.detections || []).length + " detections"
   ];
-  var maskCount = ((payload.snapshot && payload.snapshot.elements) || []).filter(shouldRedactElement).length;
+  var maskIds = redactedElementIds();
+  var maskCount = ((payload.snapshot && payload.snapshot.elements) || []).filter(function (element) {
+    return shouldRedactElement(element, maskIds);
+  }).length;
   if (maskCount) {
-    metrics.push(maskCount + " fields masked from DOM");
+    metrics.push(maskCount + " regions masked from DOM");
   }
   if (ocr) {
     metrics.push("OCR " + ocr.inferenceTimeMs + " ms");
@@ -552,7 +674,7 @@ function renderVision(payload) {
         "p",
         "empty-list",
         maskCount
-          ? "YOLOS found no COCO objects. Only policy-flagged fields were masked from the DOM."
+          ? "YOLOS found no COCO objects. Only policy-flagged DOM regions were masked."
           : "No objects detected at threshold 0.72."
       )
     );
@@ -593,6 +715,9 @@ function analyzeCurrentScreen() {
         return;
       }
       setStatus("Local vision finished. Screenshot stayed on this device.");
+      // Records arrive on this path but the vault does not, so a vision run
+      // can draw masks without being able to reveal anything.
+      latestRedaction = response.redaction || null;
       if (response.snapshot) {
         renderSnapshot(response.snapshot);
         showReadable();

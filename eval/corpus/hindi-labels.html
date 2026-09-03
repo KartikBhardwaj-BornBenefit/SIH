@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="hi">
+  <head>
+    <meta charset="utf-8">
+    <title>पंजीकरण</title>
+  </head>
+  <body>
+    <h1>पंजीकरण</h1>
+
+    <dl>
+      <dt>आधार संख्या</dt>
+      <dd id="hl-1">4561 2378 9011</dd>
+
+      <dt>ईमेल</dt>
+      <dd id="hl-2">asha@example.com</dd>
+
+      <dt>मोबाइल</dt>
+      <dd id="hl-3">7012345678</dd>
+    </dl>
+
+    <form>
+      <label id="hl-l1" for="hl-4">आधार संख्या</label>
+      <input id="hl-4" name="ah_sankhya" type="text">
+
+      <label id="hl-l2" for="hl-5">ईमेल</label>
+      <input id="hl-5" name="dak_pata" type="text">
+    </form>
+
+    <p>
+      Values are language independent, so the rendered identifiers above were
+      always detected. The empty fields below them were not, because every
+      keyword in the catalog used to be English. Phase 8 added Devanagari
+      patterns, so field-purpose matching now reads the Hindi labels. Both
+      inputs are named in romanised Hindi that no pattern matches, which is
+      what makes this page a test of the label text rather than the attribute.
+    </p>
+  </body>
+</html>

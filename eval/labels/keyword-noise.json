@@ -1,0 +1,8 @@
+{
+  "note": "Precision test for the keyword layer, and the page that motivated the Phase 8 address rework. A field-purpose signal is expected where the wording genuinely indicates the category, including on a label that describes an adjacent control. It is not expected where the keyword match is incidental: \"Email address\" is an email heading, not a postal one, and neither \"IP address\" nor \"address your complaint\" is postal at all. All three used to flag as address and were the only false positives in the corpus. kn-note deliberately contains the word postal to prove the pattern no longer matches a bare occurrence.",
+  "expect": {
+    "kn-1": ["email/field-purpose"],
+    "kn-l1": ["phone/field-purpose"],
+    "kn-5": ["phone/field-purpose"]
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "note": "One address buried in prose. The other paragraphs are ordinary text and must produce nothing, so this page checks that a long body does not generate spurious matches.",
+  "expect": {
+    "ab-p2": ["email/value/structure"]
+  }
+}

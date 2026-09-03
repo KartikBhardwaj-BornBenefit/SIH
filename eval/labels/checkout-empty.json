@@ -1,0 +1,12 @@
+{
+  "note": "Empty payment and delivery form. Purpose signals only, no values. Card and CVV are fieldOnly categories, so their labels must not flag; address is not fieldOnly, so its labels legitimately do — a label describes the control beside it. This page supplies the only genuine address hits in the corpus, which keeps that category's precision meaningful against the false positives in keyword-noise.html.",
+  "expect": {
+    "ce-1": ["payment_card/field-purpose"],
+    "ce-2": ["cvv/field-purpose"],
+    "ce-3": ["payment_card/field-purpose"],
+    "ce-l5": ["address/field-purpose"],
+    "ce-6": ["address/field-purpose"],
+    "ce-l6": ["address/field-purpose"],
+    "ce-7": ["address/field-purpose"]
+  }
+}

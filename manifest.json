@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Privacy-Preserving Browser Agent",
-  "version": "0.2.0",
-  "description": "Local DOM extraction plus an on-device vision baseline. Screenshots are never uploaded.",
+  "version": "0.5.0",
+  "description": "Local DOM extraction with checksum-verified identifier detection, plus an on-device vision baseline. Screenshots are never uploaded.",
   "action": {
     "default_title": "Analyze current page",
     "default_popup": "src/popup/popup.html",

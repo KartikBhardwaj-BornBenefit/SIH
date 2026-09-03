@@ -1,0 +1,9 @@
+{
+  "note": "Table cells, which the main selector list does not collect. These have to arrive through the value-only second pass. Header cells and grade cells must stay clean.",
+  "expect": {
+    "tr-2": ["pan/value/structure"],
+    "tr-3": ["phone/value/structure"],
+    "tr-6": ["pan/value/structure"],
+    "tr-7": ["phone/value/structure"]
+  }
+}

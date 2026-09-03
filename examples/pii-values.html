@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Value-level PII test</title>
+    <style>
+      body {
+        font-family: Segoe UI, system-ui, sans-serif;
+        max-width: 720px;
+        margin: 32px auto;
+        color: #1b1b1b;
+        line-height: 1.5;
+      }
+      h2 {
+        margin-top: 32px;
+        border-bottom: 1px solid #ddd;
+        padding-bottom: 4px;
+      }
+      .expect {
+        color: #666;
+        font-size: 0.85em;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: 200px 1fr;
+        gap: 4px 12px;
+      }
+      dt {
+        color: #555;
+      }
+      dd {
+        margin: 0;
+        font-family: Consolas, monospace;
+      }
+      label {
+        display: block;
+        margin: 12px 0 4px;
+      }
+      input {
+        font: inherit;
+        padding: 6px 8px;
+        width: 320px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Value-level PII test</h1>
+    <p>
+      Phase 1 and 2 only asked whether a <em>field</em> requests sensitive
+      data. This page carries no such fields in most sections — the
+      identifiers are rendered as ordinary text, the way an already-submitted
+      profile page displays them. Nothing here is a real person's data; the
+      numbers are constructed to satisfy or deliberately fail their checksums.
+    </p>
+
+    <h2>A. Checksum pair — the important one</h2>
+    <p class="expect">
+      These two Aadhaar-shaped numbers differ by one digit. The first passes
+      the Verhoeff check digit, the second does not. Expect exactly one
+      Aadhaar flag, and expect “Checksum verified” to read 1 for this pair.
+    </p>
+    <dl>
+      <dt>Verhoeff-valid</dt>
+      <dd>2345 6789 0124</dd>
+      <dt>Verhoeff-invalid</dt>
+      <dd>2345 6789 0123</dd>
+    </dl>
+
+    <h2>B. Rendered profile data</h2>
+    <p class="expect">
+      No inputs in this section. A keyword-only classifier reports nothing
+      here; value detection should flag every row.
+    </p>
+    <dl>
+      <dt>Email</dt>
+      <dd>asha.menon@example.com</dd>
+      <dt>Mobile</dt>
+      <dd>+91 98765 43210</dd>
+      <dt>UPI</dt>
+      <dd>asha@okaxis</dd>
+      <dt>PAN</dt>
+      <dd>AAPFU0939F</dd>
+      <dt>IFSC</dt>
+      <dd>HDFC0001234</dd>
+      <dt>GSTIN</dt>
+      <dd>27AAPFU0939F1ZV</dd>
+      <dt>Card on file</dt>
+      <dd>4111 1111 1111 1111</dd>
+    </dl>
+
+    <h2>C. Near-misses that must stay unflagged</h2>
+    <p class="expect">
+      Every value below has the right shape and the wrong arithmetic, or is an
+      innocent number of similar length. Expect zero flags in this section.
+      This is the false-positive control.
+    </p>
+    <dl>
+      <dt>Order reference</dt>
+      <dd>2345 6789 0123</dd>
+      <dt>Card, Luhn-invalid</dt>
+      <dd>4111 1111 1111 1112</dd>
+      <dt>PAN, bad entity char</dt>
+      <dd>AAPZU0939F</dd>
+      <dt>IFSC, missing fixed zero</dt>
+      <dd>HDFC1001234</dd>
+      <dt>GSTIN, bad check char</dt>
+      <dd>27AAPFU0939F1ZA</dd>
+      <dt>Invoice total</dt>
+      <dd>1234567890</dd>
+      <dt>Landline, not mobile</dt>
+      <dd>0224 5678901</dd>
+    </dl>
+
+    <h2>D. Weak shapes need a nearby keyword</h2>
+    <p class="expect">
+      Voter ID and passport formats are too loose to trust alone, so they only
+      count when the surrounding text names the category. The first row should
+      flag; the second is the same shape with no keyword and must not.
+    </p>
+    <dl>
+      <dt>Voter ID (EPIC)</dt>
+      <dd>ABC1234567</dd>
+      <dt>Warehouse bin code</dt>
+      <dd>XYZ9876543</dd>
+    </dl>
+
+    <h2>E. Obfuscated form, no helpful attributes</h2>
+    <p class="expect">
+      These inputs are pre-filled and carry meaningless names, so field-purpose
+      matching learns nothing from them. Detection has to come from the value.
+      Expect Aadhaar and email flags reported as “in value”.
+    </p>
+    <form>
+      <label for="f1">Field one</label>
+      <input id="f1" name="f_7a2b" type="text" value="234567890124">
+
+      <label for="f2">Field two</label>
+      <input id="f2" name="f_9c4d" type="text" value="asha.menon@example.com">
+
+      <label for="f3">Field three</label>
+      <input id="f3" name="f_2e6f" type="text" value="just a normal note">
+    </form>
+
+    <h2>F. Field purpose with no value</h2>
+    <p class="expect">
+      The opposite case: empty inputs whose labels make the purpose obvious.
+      Expect flags reported as “asks”, with no value signal and no mask.
+    </p>
+    <form>
+      <label for="pw">Password</label>
+      <input id="pw" name="password" type="password" autocomplete="current-password">
+
+      <label for="aad">Aadhaar number</label>
+      <input id="aad" name="aadhaar" type="text" placeholder="Aadhaar">
+    </form>
+  </body>
+</html>

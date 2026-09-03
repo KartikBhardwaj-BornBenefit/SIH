@@ -14,7 +14,7 @@
           </div>
           <div class="brand-text">
             <h1>Browser Agent</h1>
-            <p>Phase 2 · DOM + local vision</p>
+            <p>Phase 5 · safe snapshot · nothing uploaded</p>
           </div>
         </div>
         <span class="local-pill" title="Page data never leaves this device">
@@ -123,7 +123,33 @@
             <span>Interactive visible elements</span>
             <strong id="stat-interactive-visible">0</strong>
           </div>
+          <div class="compare-row">
+            <span>Identifier values found</span>
+            <strong id="stat-value-matched">0</strong>
+          </div>
+          <div class="compare-row">
+            <span>Checksum verified</span>
+            <strong id="stat-checksum">0</strong>
+          </div>
+          <div class="compare-row">
+            <span>Values replaced with placeholders</span>
+            <strong id="stat-redacted">0</strong>
+          </div>
         </div>
+
+        <label class="reveal-toggle">
+          <input type="checkbox" id="reveal-values" disabled>
+          Reveal what was redacted
+        </label>
+        <section id="vault-panel" class="vault-panel" hidden>
+          <p class="vault-caption">
+            Shown so you can check the redaction is right. These values are
+            held in this popup only, are gone when it closes, and are never
+            included in the JSON view or the Copy JSON button.
+          </p>
+          <div id="vault-list"></div>
+          <p id="vault-note" class="vault-note"></p>
+        </section>
 
         <div class="page-card">
           <p id="page-title" class="page-title"></p>
@@ -166,7 +192,9 @@
       </section>
     </div>
 
+    <script src="../utils/text.js"></script>
     <script src="../utils/sensitivityCatalog.js"></script>
+    <script src="../utils/validators.js"></script>
     <script src="../utils/sensitivity.js"></script>
     <script src="../vision/hybrid/decisionLayer.js"></script>
     <script src="sensitivityForm.js"></script>

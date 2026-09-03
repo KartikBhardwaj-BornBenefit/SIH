@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Split value</title>
+  </head>
+  <body>
+    <h1>Split value</h1>
+    <p id="isv-note">
+      The number below is a valid Aadhaar broken across two inline elements.
+      Detection used to scan only each element's own child text nodes, so
+      neither half was a complete identifier and the paragraph reported
+      nothing — while the joined form was serialised into its text field
+      regardless. Redaction re-scans what is serialised and replaced it
+      anyway, so the value never leaked, but the element carried no signal
+      saying why it had been redacted. Detection now scans the same string.
+    </p>
+
+    <p id="isv-line">Reference: <span id="isv-a">4561</span><span id="isv-b">2378 9011</span></p>
+
+    <p id="isv-control">Reference: <span id="isv-whole">4561 2378 9011</span></p>
+  </body>
+</html>

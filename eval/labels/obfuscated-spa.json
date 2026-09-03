@@ -1,0 +1,8 @@
+{
+  "note": "The case a keyword classifier cannot reach: machine-generated attribute names, no labels, PII only in the values. Every hit here must come from control-value.",
+  "expect": {
+    "o-f1": ["aadhaar/control-value/checksum"],
+    "o-f2": ["email/control-value/structure"],
+    "o-f3": ["pan/control-value/structure"]
+  }
+}

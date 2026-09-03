@@ -1,0 +1,8 @@
+{
+  "note": "Credential fields, all empty. Password, OTP and username are fieldOnly categories, so the labels and the reset link must not flag despite containing the keywords.",
+  "expect": {
+    "ls-1": ["username/field-purpose"],
+    "ls-2": ["password/field-purpose"],
+    "ls-3": ["otp/field-purpose"]
+  }
+}

@@ -1,7 +1,11 @@
 /**
  * Background service worker (Manifest V3).
  *
- * DOM extraction is unchanged: inject content scripts, return a snapshot.
+ * Injects content scripts and relays messages. The snapshot it forwards is
+ * already redacted by the content script, so this file never sees an
+ * unredacted one. It relays the session vault to the popup without retaining
+ * it: nothing here is kept between messages and nothing is written to storage.
+ *
  * Vision runs in an offscreen document so screenshots never leave the device
  * and the service worker is not used as an inference runtime.
  */
@@ -9,6 +13,7 @@
 var MSG = {
   PING: "PING",
   EXTRACT_DOM: "EXTRACT_DOM",
+  FILL_FROM_VAULT: "FILL_FROM_VAULT",
   ANALYZE_PAGE: "ANALYZE_PAGE",
   VISION_INIT: "VISION_INIT",
   VISION_STATUS: "VISION_STATUS",
@@ -23,9 +28,11 @@ var CONTENT_SCRIPT_FILES = [
   "src/utils/text.js",
   "src/utils/visibility.js",
   "src/utils/sensitivityCatalog.js",
+  "src/utils/validators.js",
   "src/utils/sensitivity.js",
   "src/utils/identifiers.js",
   "src/content/domExtractor.js",
+  "src/content/redaction.js",
   "src/content/content.js"
 ];
 
@@ -171,6 +178,9 @@ async function analyzeScreen(options) {
   var policy = options && options.sensitivityPolicy;
   var domResult = await analyzeTab(tab, "viewport", policy);
   var snapshot = domResult && domResult.ok ? domResult.snapshot : null;
+  // Records only: the canvas needs element ids and placeholders to draw masks,
+  // never the values. The vault is deliberately not forwarded on this path.
+  var redaction = domResult && domResult.ok ? domResult.redaction : null;
 
   var imageDataUrl;
   try {
@@ -181,7 +191,8 @@ async function analyzeScreen(options) {
       error:
         "Could not capture this tab. " +
         (error && error.message ? error.message : String(error)),
-      snapshot: snapshot
+      snapshot: snapshot,
+      redaction: redaction
     };
   }
 
@@ -195,7 +206,8 @@ async function analyzeScreen(options) {
     return {
       ok: false,
       error: (visionResponse && visionResponse.error) || "Local vision inference failed.",
-      snapshot: snapshot
+      snapshot: snapshot,
+      redaction: redaction
     };
   }
 
@@ -203,6 +215,7 @@ async function analyzeScreen(options) {
     ok: true,
     imageDataUrl: imageDataUrl,
     snapshot: snapshot,
+    redaction: redaction,
     vision: visionResponse.vision,
     ocr: visionResponse.ocr || null,
     wallTimeMs: visionResponse.wallTimeMs,
@@ -233,6 +246,34 @@ chrome.runtime.onMessage.addListener(function (message, _sender, sendResponse) {
       var tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       var result = await analyzeTab(tabs[0], message.mode, message.sensitivityPolicy);
       sendResponse(result);
+    })();
+    return true;
+  }
+
+  // De-referencing relay. Carries a placeholder and an element id, never a
+  // value, so the payload is safe even though it passes through here.
+  if (message.type === MSG.FILL_FROM_VAULT) {
+    (async function () {
+      try {
+        var tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        var tab = tabs[0];
+        if (!tab || tab.id == null) {
+          sendResponse({ ok: false, error: "No active tab found." });
+          return;
+        }
+        sendResponse(
+          await chrome.tabs.sendMessage(tab.id, {
+            type: MSG.FILL_FROM_VAULT,
+            elementId: message.elementId,
+            placeholder: message.placeholder
+          })
+        );
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error: error && error.message ? error.message : String(error)
+        });
+      }
     })();
     return true;
   }

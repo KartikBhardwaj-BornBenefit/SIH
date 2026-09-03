@@ -1,0 +1,11 @@
+{
+  "note": "The Phase 6 target, added while the corpus was fully saturated so that NER has measurable headroom. Person names in prose have no field purpose and no checksum, so the rule and validator layers cannot reach them: every entry here is an expected miss until a model lands, and recall on person_name is the number Phase 6 has to move. Confidence is deliberately left off each label because the token a model reports is Phase 6's decision, not this file's. The un-d* distractors carry no expectation and are the precision half of the test — places, companies, statutes, couriers and a river are all capitalised phrases that a name model is likely to over-flag, and any of them appearing as a false positive should fail the gate. un-5 and un-6 sit under an \"Attendee\" header rather than \"Name\" so keyword matching cannot reach them either.",
+  "expect": {
+    "un-1": ["person_name/value"],
+    "un-2": ["person_name/value"],
+    "un-3": ["person_name/value"],
+    "un-4": ["person_name/value"],
+    "un-5": ["person_name/value"],
+    "un-6": ["person_name/value"]
+  }
+}
