@@ -597,6 +597,31 @@ function restrictedPageMessage(url) {
   );
 }
 
+/**
+ * Toolbar popups are not tabs, so sender.tab is unset and the active tab is
+ * the page behind the popup. If popup.html is itself a tab, skip that sender
+ * tab and use a sibling http(s)/file page. chrome:// tabs still fail the
+ * injectability check below.
+ */
+async function getActionTab(sender) {
+  var senderTabId = sender && sender.tab && sender.tab.id;
+  var tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (!tabs || !tabs.length) {
+    tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  }
+  var tab = tabs && tabs[0];
+  if (tab && senderTabId != null && tab.id === senderTabId) {
+    var siblings = await chrome.tabs.query({ windowId: tab.windowId });
+    var injectable = (siblings || []).find(function (candidate) {
+      return candidate.id !== senderTabId && isInjectableUrl(candidate.url);
+    });
+    if (injectable) {
+      return injectable;
+    }
+  }
+  return tab;
+}
+
 async function ensureContentScript(tabId) {
   await chrome.scripting.executeScript({
     target: { tabId: tabId },
@@ -749,10 +774,9 @@ async function runNer(texts) {
   return { ok: true, ner: response.ner, status: lastNerStatus };
 }
 
-async function analyzeScreen(options) {
+async function analyzeScreen(options, sender) {
   var totalStart = performance.now();
-  var tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  var tab = tabs[0];
+  var tab = await getActionTab(sender);
   if (!tab || tab.id == null) {
     return { ok: false, error: "No active tab found." };
   }
@@ -845,7 +869,7 @@ async function analyzeScreen(options) {
   };
 }
 
-chrome.runtime.onMessage.addListener(function (message, _sender, sendResponse) {
+chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
   if (!message || !message.type) {
     return;
   }
@@ -880,8 +904,8 @@ chrome.runtime.onMessage.addListener(function (message, _sender, sendResponse) {
 
   if (message.type === MSG.ANALYZE_PAGE) {
     (async function () {
-      var tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      var result = await analyzeTab(tabs[0], message.mode, message.sensitivityPolicy);
+      var tab = await getActionTab(sender);
+      var result = await analyzeTab(tab, message.mode, message.sensitivityPolicy);
       sendResponse(result);
     })();
     return true;
@@ -920,8 +944,8 @@ chrome.runtime.onMessage.addListener(function (message, _sender, sendResponse) {
           sendResponse({ ok: false, error: "An agent run is already in progress." });
           return;
         }
-        var tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        sendResponse(await runAgent(tabs[0], message));
+        var tab = await getActionTab(sender);
+        sendResponse(await runAgent(tab, message));
       } catch (error) {
         sendResponse({
           ok: false,
@@ -938,8 +962,7 @@ chrome.runtime.onMessage.addListener(function (message, _sender, sendResponse) {
   if (message.type === MSG.FILL_FROM_VAULT) {
     (async function () {
       try {
-        var tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        var tab = tabs[0];
+        var tab = await getActionTab(sender);
         if (!tab || tab.id == null) {
           sendResponse({ ok: false, error: "No active tab found." });
           return;
@@ -1014,7 +1037,7 @@ chrome.runtime.onMessage.addListener(function (message, _sender, sendResponse) {
   if (message.type === MSG.ANALYZE_SCREEN) {
     (async function () {
       try {
-        var result = await analyzeScreen(message);
+        var result = await analyzeScreen(message, sender);
         sendResponse(result);
       } catch (error) {
         sendResponse({

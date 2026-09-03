@@ -22,6 +22,75 @@ function chromeExecutable() {
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
 
+function logE2e(label, value) {
+  const rendered = typeof value === "string" ? value : JSON.stringify(value);
+  console.log(`[e2e] ${label} ${rendered}`);
+}
+
+async function chromeTabState(worker) {
+  return worker.evaluate(async () => {
+    const summarize = (tabs) =>
+      (tabs || []).map((tab) => ({
+        id: tab.id,
+        url: tab.url || "",
+        title: tab.title || "",
+        active: Boolean(tab.active),
+        windowId: tab.windowId,
+        status: tab.status || ""
+      }));
+    return {
+      active: summarize(await chrome.tabs.query({ active: true, lastFocusedWindow: true })),
+      all: summarize(await chrome.tabs.query({}))
+    };
+  });
+}
+
+async function focusDemoTab(worker, demoPage, demoUrl) {
+  await demoPage.bringToFront();
+  const deadline = Date.now() + 10000;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await worker.evaluate(async (targetUrl) => {
+      const tabs = await chrome.tabs.query({});
+      const target = tabs.find(
+        (tab) => tab.url === targetUrl || (tab.url && tab.url.startsWith(targetUrl))
+      );
+      if (!target || target.id == null) {
+        return {
+          ok: false,
+          reason: "demo tab not found",
+          tabs: tabs.map((tab) => ({
+            id: tab.id,
+            url: tab.url || "",
+            active: Boolean(tab.active)
+          }))
+        };
+      }
+      if (!target.active) {
+        await chrome.tabs.update(target.id, { active: true });
+      }
+      try {
+        await chrome.windows.update(target.windowId, { focused: true });
+      } catch (_error) {
+        // Headless Chrome may ignore window focus; activating the tab is enough.
+      }
+      const active = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const activeTab = active[0];
+      return {
+        ok: Boolean(activeTab && activeTab.id === target.id && activeTab.url === target.url),
+        tabId: target.id,
+        url: target.url,
+        activeUrl: (activeTab && activeTab.url) || ""
+      };
+    }, demoUrl);
+    if (last.ok) {
+      return last;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Failed to focus demo tab ${demoUrl}: ${JSON.stringify(last)}`);
+}
+
 test("unpacked extension completes the offline SIH demo through the mock server", {
   timeout: 120000
 }, async () => {
@@ -44,6 +113,9 @@ test("unpacked extension completes the offline SIH demo through the mock server"
     server.once("error", reject);
   });
   const serverUrl = `http://127.0.0.1:${server.address().port}`;
+  const demoUrl = `${serverUrl}/demo/sih-demo.html`;
+  logE2e("chrome", executablePath);
+  logE2e("mockServer", serverUrl);
 
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "privacy-agent-e2e-"));
   const extensionRoot = path.join(profile, "extension");
@@ -84,12 +156,18 @@ test("unpacked extension completes the offline SIH demo through the mock server"
       globalThis.BrowserAgentLlm.endpoint = endpoint;
     }, `${serverUrl}/agent`);
     const extensionId = new URL(worker.url()).host;
-    const demo = await context.newPage();
-    await demo.goto(`${serverUrl}/demo/sih-demo.html`);
+    logE2e("extensionId", extensionId);
+
+    // Reuse Chrome's startup tab so about:blank / chrome://newtab is not left
+    // behind as the "active" tab the service worker would otherwise analyze.
+    const demo = context.pages()[0] || (await context.newPage());
+    await demo.goto(demoUrl, { waitUntil: "domcontentloaded" });
+    await demo.locator("#contact-form").waitFor({ state: "visible" });
 
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/src/popup/popup.html`);
     popup.on("dialog", (dialog) => dialog.accept());
+    await popup.locator("#agent-run").waitFor({ state: "visible" });
     await popup.evaluate(() => {
       const personName = document.querySelector('[data-category="person_name"]');
       if (personName) {
@@ -98,8 +176,18 @@ test("unpacked extension completes the offline SIH demo through the mock server"
       }
     });
 
+    for (const page of context.pages()) {
+      if (page !== demo && page !== popup && !page.isClosed()) {
+        await page.close();
+      }
+    }
+
+    const focused = await focusDemoTab(worker, demo, demoUrl);
+    logE2e("pages", context.pages().map((page) => page.url()));
+    logE2e("focusedTab", focused);
+
     if (process.env.FAST_E2E !== "1") {
-      await demo.bringToFront();
+      await focusDemoTab(worker, demo, demoUrl);
       const localAnalysis = await popup.evaluate(
         () =>
           new Promise((resolve) => {
@@ -125,6 +213,7 @@ test("unpacked extension completes the offline SIH demo through the mock server"
       assert.ok(localAnalysis.ocr.items.every((item) => !Object.hasOwn(item, "text")));
     }
 
+    await focusDemoTab(worker, demo, demoUrl);
     await popup.evaluate(() => {
       document.getElementById("agent-goal").value =
         "Fill the contact form using the approved email placeholder, choose Student and continue, but do not fill or reveal the password.";
@@ -144,10 +233,17 @@ test("unpacked extension completes the offline SIH demo through the mock server"
         error: document.getElementById("agent-error").textContent,
         log: document.getElementById("agent-log").textContent
       }));
-      throw new Error(`Agent did not complete: ${JSON.stringify(diagnostics)}`, {
-        cause: error
-      });
+      const tabs = await chromeTabState(worker);
+      throw new Error(
+        `Agent did not complete: ${JSON.stringify({ ...diagnostics, demoUrl, tabs })}`,
+        { cause: error }
+      );
     }
+    const agentState = await popup.evaluate(() => ({
+      state: document.getElementById("agent-state").textContent,
+      error: document.getElementById("agent-error").textContent
+    }));
+    logE2e("agentState", agentState);
     await demo.bringToFront();
     await demo.locator("#completion").waitFor({ state: "visible" });
     assert.equal(await demo.locator('input[type="password"]').inputValue(), "");
