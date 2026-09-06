@@ -19,7 +19,7 @@ popup  →  service worker  →  content script  →  page DOM
                        local WASM inference
 ```
 
-- **Popup** (`src/popup/`): the only UI. Clicking **Analyze Current Page** asks the service worker to inspect the active tab. Results stay in the popup.
+- **Popup** (`src/popup/`): the main UI. Clicking **Analyze Current Page** asks the service worker to inspect the active tab. After an agent run, **View all screens** opens a local window with every sanitized screenshot from that task.
 - **Service worker** (`src/background/serviceWorker.js`): a Manifest V3 background script. It cannot see the page DOM. It injects the content script on demand, then forwards the snapshot back to the popup.
 - **Content script** (`src/content/`): runs in Chrome's *isolated world*. It can read the page DOM, but it does not share JavaScript with the page. Extraction logic lives in `domExtractor.js`. Redaction lives in `redaction.js`.
 - **Utils** (`src/utils/`): visibility checks, the sensitivity catalog and classifier, identifier validators, text cleanup, and stable element ids.
@@ -28,7 +28,7 @@ popup  →  service worker  →  content script  →  page DOM
 
 ### Why on-demand injection?
 
-The extension uses `activeTab` and `scripting`. The content script is injected **only when you click Analyze**, not on every page load. That is a privacy choice: the extension does not silently scrape browsing history.
+The extension uses `activeTab` and `scripting`. The content script is injected **only when you click Analyze or Run agent**, not on every page load. That is a privacy choice: the extension does not silently scrape browsing history. Multi-step runs declare the `<all_urls>` host permission so a later turn can still read the page **and** capture a sanitized screenshot after navigation. `activeTab` alone only covers the tab that was active when you clicked the icon. Chrome will show that as access to websites; the script still only runs when you start an analysis.
 
 ### Manifest V3 notes that matter here
 
@@ -286,6 +286,12 @@ The scored corpus remains deliberately separate from real-model measurements: it
 
 Reload the unpacked extension after pulling these changes (`chrome://extensions` → **Reload**), then close and reopen the popup.
 
+### Agent screenshot gallery
+
+1. Run a Hybrid or **Sanitized image** task that visits more than one page.
+2. In the popup, use the thumbnail strip under **Sanitized screenshots**, or click **View all screens** (or the preview image) to open a larger window you can move to another monitor.
+3. Reopening the popup restores the last task's captures from memory. They are not written to disk, and they disappear if Chrome restarts the service worker.
+
 ### Visibility filter page
 
 1. Open `examples/visibility-test.html` in Chrome (enable **Allow access to file URLs** if needed).
@@ -366,24 +372,19 @@ Each run stores model, backend, image size, model load time, inference time, det
 
 ## Agent server
 
-The extension defaults to `http://127.0.0.1:4317/agent`. Start the offline deterministic provider:
+The extension defaults to `http://127.0.0.1:4317/agent`. Paste a cloud key only in **`server/.env`** (never in the extension). A template is `server/.env.example`.
 
 ```bash
+# server/.env  — paste the OpenRouter key (sk-or-...) on the AGENT_API_KEY line
+AGENT_PROVIDER=openrouter
+AGENT_ENDPOINT=https://openrouter.ai/api/v1/chat/completions
+AGENT_MODEL=qwen/qwen3.7-flash
+AGENT_FALLBACK_MODELS=openai/gpt-4o-mini
+AGENT_API_KEY=
 npm run server
 ```
 
-No API key is needed. For an OpenAI-compatible local deployment (Ollama, vLLM or LM Studio) or cloud provider, configure the **server process**, never the extension:
-
-```bash
-AGENT_PROVIDER=openai
-AGENT_ENDPOINT=http://127.0.0.1:1234/v1/chat/completions
-AGENT_MODEL=your-model
-AGENT_API_KEY=optional-for-local-hosts
-AGENT_IMAGE_ENABLED=true
-npm run server
-```
-
-Cloud use follows the same variables with an HTTPS endpoint and key. Only already-sanitized input reaches that provider. `AGENT_ALLOWED_ORIGINS` can be a comma-separated extension-origin allowlist for a fixed demo installation. The server exposes `GET /health` and validated `POST /agent`; request bodies default to a 6 MB maximum and provider calls time out.
+With no `server/.env` (or `AGENT_PROVIDER=mock`), the offline demo provider is used. Gemini, OpenAI, Ollama, or another OpenAI-compatible host still work if you change `AGENT_ENDPOINT` and `AGENT_MODEL` in that same file. Only already-sanitized input reaches the provider. `AGENT_ALLOWED_ORIGINS` can be a comma-separated extension-origin allowlist for a fixed demo installation. The server exposes `GET /health` and validated `POST /agent`; request bodies default to a 6 MB maximum and provider calls time out.
 
 ## Reproducible SIH demonstration
 

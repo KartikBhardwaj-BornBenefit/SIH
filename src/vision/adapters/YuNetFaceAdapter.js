@@ -3,13 +3,18 @@
  *
  * YuNet is a 232 KB model trained for faces down to roughly 10×10 pixels. It
  * is a better fit than selfie-oriented BlazeFace for browser screenshots and
- * printed document portraits. All inference remains in the offscreen page.
+ * printed document portraits. Mid-confidence QR and text hits are dropped
+ * after decode; all inference remains in the offscreen page.
  */
 import * as ort from "onnxruntime-web";
 import { ModelAdapter } from "./ModelAdapter.js";
+import {
+  FACE_SCORE_THRESHOLD,
+  filterFaceDetections,
+  isPlausibleFace
+} from "../faceFilters.js";
 
 var INPUT_SIZE = 640;
-var SCORE_THRESHOLD = 0.45;
 var NMS_THRESHOLD = 0.3;
 var STRIDES = [8, 16, 32];
 
@@ -80,7 +85,7 @@ function decodeOutputs(outputs) {
       var classScore = Math.min(1, Math.max(0, cls[i]));
       var objectScore = Math.min(1, Math.max(0, obj[i]));
       var score = Math.sqrt(classScore * objectScore);
-      if (score < SCORE_THRESHOLD) {
+      if (score < FACE_SCORE_THRESHOLD) {
         continue;
       }
       var row = Math.floor(i / featureWidth);
@@ -212,7 +217,7 @@ export class YuNetFaceAdapter extends ModelAdapter {
         };
       })
       .filter(function (item) {
-        return item.boundingBox.width >= 4 && item.boundingBox.height >= 4;
+        return isPlausibleFace(item.boundingBox);
       });
   }
 
@@ -252,7 +257,11 @@ export class YuNetFaceAdapter extends ModelAdapter {
     }
 
     return {
-      detections: nonMaximumSuppression(detections),
+      detections: filterFaceDetections(
+        nonMaximumSuppression(detections),
+        image.naturalWidth,
+        image.naturalHeight
+      ),
       inferenceTimeMs: Math.round(performance.now() - start),
       model: this.displayName,
       modelId: this.modelId,

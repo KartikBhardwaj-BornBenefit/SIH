@@ -1,0 +1,434 @@
+TESSERACT BTW — teammate prep notes
+SIH 2026  |  PS 26171  |  Software  |  Smart Automation  |  ISRO
+Product: Privacy-Preserving Browser Agent
+Tagline: Local privacy. Remote reasoning.
+
+How to share this
+- Best: send this .txt as a WhatsApp *document* (not a huge paste).
+- Or send one SECTION at a time as a chat message.
+- Read once before the presentation. The last two sections are Q&A and “do not say”.
+
+
+==================================================
+1. ONE-LINE PITCH  (memorise this)
+==================================================
+
+We built a Chrome extension that lets a cloud model help you use a webpage WITHOUT seeing Aadhaar, PAN, passwords, faces, or other secrets. Detection and redaction happen on the device. Only sanitised context leaves the browser. The model may propose clicks and fills. Deterministic code decides what is actually allowed.
+
+Shorter version for intro:
+“A privacy proxy between the page and the LLM. The screen stays local. The plan comes back as a closed list of actions.”
+
+
+==================================================
+2. THE PROBLEM WE ARE SOLVING  (SIH26171)
+==================================================
+
+Organisation: Indian Space Research Organisation (ISRO)
+Official title: On-device Visual Perception for Light-weight Browser Agents
+Category: Software
+Theme: Smart Automation
+
+What ISRO actually asked for
+- Browser agents are useful only if they can “see” the screen.
+- Most agent pipelines are on a server, so a raw screenshot leaks credentials, Indian IDs, faces, and private workflow data.
+- A laptop cannot host a full giant VLM. So the client must send only non-sensitive structure: layout, fields, redacted text, sanitised pixels.
+- Then the server LLM/VLM returns actions like “click submit” or “scroll down”.
+- Balance latency vs accuracy. Demonstrate an end-to-end task.
+
+How judges will score it (say this if asked)
+1. Accuracy of visual / screen context — 25%
+2. Recall and precision of sensitive/PII detection — 20%
+3. Precision of redaction — 20%
+4. Client-side resource use — 20%
+5. End-to-end latency of the demo task — 15%
+
+The gap in the market
+- Cloud GUI agents (Operator-style): they see the raw screen. Privacy is a prompt, not a gate.
+- Browser copilots: they help, but they are not a redaction architecture.
+- Password managers: they store secrets locally, but they cannot perceive the page or act as an agent.
+
+Tesseract is the combination: on-device perception + Indian ID intelligence + screenshot masks + a constrained agent.
+
+
+==================================================
+3. WHAT WE ACTUALLY SHIPPED
+==================================================
+
+A working prototype, not a slide-ware idea.
+
+- Chrome / Edge Manifest V3 extension (load unpacked).
+- Local privacy stack: DOM rules, checksums, NER, YuNet faces, optional OCR, screenshot sanitizer.
+- Local Express gateway on 127.0.0.1:4317.
+- Planner: offline mock (for demo/tests) OR any OpenAI-compatible model (OpenRouter / Ollama / etc.).
+- Bounded agent loop: extract → redact → plan → validate → apply → repeat.
+- Hard stops: max 6 turns, 90 seconds total.
+
+Three user-visible modes
+1. Analyze current page — DOM only. No screenshot upload. Ever.
+2. Analyze current screen — local screenshot + YuNet + optional OCR + masked preview. Still no network of page pixels.
+3. Run agent — sanitised payload to the gateway. Model returns JSON actions. Extension executes only what the protocol allows.
+
+Demo they should be able to run
+Goal example: “Fill the contact form using the approved email placeholder, choose Student and continue, but do not fill or reveal the password.”
+Result we want judges to see: form progresses, password stays empty, placeholders not raw Aadhaar, faces blacked out if present.
+
+
+==================================================
+4. ARCHITECTURE  (this is the core of the PPT)
+==================================================
+
+Chrome’s security model forced the design. We did not invent four boxes for fun.
+
+FOUR BROWSER CONTEXTS
+
+1) Popup
+   What it is: the UI the user clicks.
+   Can see: redacted snapshot, counts, sanitised preview, timings.
+   Cannot see: vault, raw DOM, raw OCR text.
+   Why: popups cannot read a tab’s DOM in MV3.
+
+2) Service worker
+   What it is: the event-driven background brain.
+   Does: inject content script, capture tab, run the agent loop, talk to the gateway.
+   Cannot: host long WASM/canvas models (it can be killed when idle).
+   Why: MV3 workers are not a safe home for YuNet / NER / OCR.
+
+3) Content script (isolated world)
+   What it is: the only place that both reads the live page AND keeps secrets.
+   Does: extract DOM, detect PII, redact, mint the vault, apply actions, expand placeholders.
+   Critical rule: the vault NEVER leaves this world.
+   Why: Chrome isolates it from page JS, so a malicious site cannot read our vault.
+
+4) Offscreen document
+   What it is: a hidden page that can use canvas, WASM, ONNX.
+   Runs: YuNet, DistilBERT NER, Tesseract OCR.
+   Gets: already rule-redacted text for NER, in-memory screenshot for vision.
+   Never gets: the vault, and never calls the cloud LLM itself.
+
+THEN OUTSIDE THE BROWSER
+
+5) Privacy gateway (local Express, port 4317)
+   Validates the payload again.
+   Rejects unsanitised / leaking / oversized requests.
+   Calls either:
+   - mock provider (deterministic, offline, used in tests and SIH E2E), or
+   - OpenAI-compatible endpoint (key stays in server/.env, NEVER in the extension).
+
+6) Planner model
+   Sees only sanitised context (and optionally a branded masked JPEG).
+   Must reply with a closed JSON action list. Not English. Not JavaScript.
+
+ASCII FLOW (draw this if someone asks)
+
+  User
+    → Popup (consent, goal, Analyze / Run)
+      → Service worker
+        → Content script → Page DOM
+        → Offscreen WASM (YuNet / NER / OCR)
+        → Gateway :4317 → Planner
+      ← validated actions
+        → Content script expands placeholders from vault
+        → apply click/fill locally
+        → re-extract, next turn
+
+
+==================================================
+5. THE DESIGN THESIS  (say this slowly)
+==================================================
+
+Use the cheapest, strongest local evidence first.
+Send the minimum necessary sanitised context.
+Let the remote model propose intent.
+Let deterministic code own authority.
+
+Layers, in order:
+
+Layer A — Declared DOM facts
+  input type=password, autocomplete=cc-number, Hindi/English field labels.
+  Equality checks. A model would be slower and worse.
+
+Layer B — Format + checksums
+  Aadhaar Verhoeff, cards Luhn, GSTIN mod-36, PAN structure, IFSC, UPI, Indian mobile.
+  A checksum is a stronger claim than “the model is 87% sure”.
+
+Layer C — Learned models, only where A and B fail
+  Names in English prose → DistilBERT NER.
+  Faces in pixels → YuNet.
+  Text painted on an image/canvas → Tesseract OCR.
+
+If a judge asks “why not one big ViT / VLM in the extension?”
+Answer: a universal model is the wrong tool for type=password and for Aadhaar check digits. It is also too heavy for the 20% resource score. We use a model only where syntax cannot answer.
+
+
+==================================================
+6. MODELS AND TOOLS  (know each one)
+==================================================
+
+A. OpenCV YuNet 2023mar  — FACE DETECTOR
+- What: purpose-built face model, about 232 KB ONNX.
+- Where: offscreen, ONNX Runtime Web, WASM/CPU.
+- When: Analyze current screen, and agent modes that capture pixels.
+- Output: face boxes, not identity, not “this is an Aadhaar card”.
+- Why not YOLOS: YOLOS finds COCO objects like “person”, not a face rectangle we can black out.
+- Why not BlazeFace: selfie-oriented; weak on small printed portraits on ID-like pages.
+- Thresholds (if asked): score 0.45, NMS 0.30, letterboxed 640×640.
+- Honest limit: no labelled face corpus yet, so we do not quote YuNet precision.
+
+B. DistilBERT NER q8  — ENGLISH NAMES
+- What: onnx-community/distilbert-NER-ONNX, ~66 MB, WASM, one thread.
+- When: only if person_name is enabled. After rule redaction, so it never sees raw Aadhaar.
+- What it maps: CoNLL-03 PER → person_name. We do NOT map LOC → address (or “Bengaluru” gets redacted as a home).
+- Why not BERT-base: ~108 MB q8, and a 431 MB fp32 sibling could get fetched; felt hung in the popup.
+- Honest limit: English only. Devanagari names in prose are a known miss.
+
+C. Tesseract.js 6  — OCR
+- What: English OCR in the same offscreen host.
+- When: automatically if the viewport has image/canvas/video, or if the user forces “Always run local OCR”.
+- Why not always-on: it is slow on large screenshots and unnecessary on normal HTML.
+
+D. ONNX Runtime Web + Transformers.js
+- Local inference. Model weights may download once (YuNet packaged; DistilBERT from Hugging Face, then cached).
+- Screenshots and page HTML are not uploaded to Hugging Face. Only weights.
+
+E. Planner (server-side, NOT in the extension)
+- Default config: OpenRouter, qwen/qwen3.7-flash, fallback gpt-4o-mini.
+- Demo/tests: mock provider, no key, reproducible.
+- The extension never holds the API key.
+
+F. What we refused to put in production
+- YOLOv10: stub only.
+- IndicNER: right language family, no ready ONNX we measured.
+- Always-on OCR.
+- Model inside the service worker.
+- Mapping place-names to postal addresses.
+
+
+==================================================
+7. INDIAN IDENTIFIERS  (judges care about this)
+==================================================
+
+We do not “guess Aadhaar from the label”. We validate values.
+
+- Aadhaar: 12 digits, first digit 2–9, Verhoeff checksum → confidence “checksum”
+- Payment card: Luhn
+- GSTIN: state + PAN + Z + mod-36 check character
+- PAN: AAAAA9999A with a valid 4th-character entity type
+- IFSC: 5th character always 0
+- Email / UPI / Indian mobile: structure
+- Voter ID / Passport: weak shape, so we only report them if nearby text also names the category
+
+Two different questions, both reported:
+- Field purpose: this control ASKS for Aadhaar (empty form).
+- Value: this paragraph CONTAINS a real Aadhaar.
+
+Most PII on real Indian portals is already-submitted data sitting in a div, not an empty input. That is why we scan rendered text, not only labels.
+
+Redaction
+- One value → one placeholder. Same email in a heading and a link becomes <EMAIL_1> both times, so the planner knows it is one entity.
+- Passwords, OTP, CVV: placeholder exists, vault entry does NOT. There is no “reveal password” capability. By design.
+- FILL_FROM_VAULT takes an element id + a placeholder, never a raw value, and only works inside the tab.
+
+
+==================================================
+8. SCREENSHOT SANITIZER
+==================================================
+
+If pixels must leave (sanitised-image agent mode only):
+- Capture visible tab locally.
+- YuNet boxes + OCR boxes + DOM PII boxes → padded black masks (default; pixelate exists but we default to black).
+- Output is a sanitizer-branded JPEG.
+- Network code refuses the original PNG, refuses unbranded images, refuses payloads that still contain vault values.
+
+Hybrid mode nuance (do not get this wrong)
+Hybrid currently runs local vision and updates privacy counts, but it does NOT send the screenshot to the LLM. Only “sanitised image” mode gives pixels to the provider. If a judge asks Hybrid, say that honestly.
+
+
+==================================================
+9. THE AGENT  (closed vocabulary)
+==================================================
+
+Allowed actions only:
+click, fill, type, select, check, uncheck, press (Enter/Tab/Escape/Space), scroll, wait, done.
+
+Rejected:
+- unknown action types
+- extra JSON keys
+- made-up element ids
+- JavaScript, CSS selectors, URLs, “run this code”
+- filling password / OTP / CVV
+- submit / send / purchase / delete / continue without user confirmation
+
+Each turn:
+1. Fresh extract (stale ids fail closed)
+2. Redact
+3. Optional vision
+4. Leak gates (client + server)
+5. Plan
+6. Validate twice
+7. Confirm risky clicks
+8. Apply locally
+9. Stop on done, repeat, 6 turns, or 90s
+
+The remote model proposes. It cannot expand its own authority.
+
+
+==================================================
+10. NUMBERS WE CAN SAY  vs  CANNOT SAY
+==================================================
+
+CAN say (rule-only eval harness, 16 synthetic pages)
+- 46 true positives, 0 false positives, 10 misses
+- Precision 100%, recall ~82%, F1 90.2%
+- Remaining scored misses are person_name, because this harness does NOT load NER
+- Separate suites: safety tests, server tests, Playwright E2E with real YuNet/OCR
+
+CANNOT say
+- “YuNet is 98% accurate” — we have no labelled face/OCR pixel corpus
+- “The whole system is 90% accurate” — that F1 is DOM/value rules, not YuNet+OCR+NER+agent
+- “We support Firefox” — not implemented
+- “Hindi names in prose are handled” — catalog keywords yes; Indic NER no
+- “Zero leakage” — detection is imperfect; we reduce risk, we do not claim anonymity
+
+If asked for SIH metric 2/3 (PII precision/recall, redaction precision):
+Lead with the 16-page rule numbers, then say live NER/YuNet are demonstrated in the browser, not scored on that corpus.
+
+
+==================================================
+11. PPT SLIDE TALK TRACK  (~60–90 sec each)
+==================================================
+
+SLIDE 1 — Title
+“Team Tesseract BTW. PS 26171, ISRO. On-device visual perception for light-weight browser agents. We built a Chrome extension that is a privacy proxy: local perception, remote reasoning, local action.”
+
+SLIDE 2 — Proposed solution
+Walk left column 1→5.
+Then point at the red column: this is what cloud agents do today — raw screen, raw PII.
+Then mockups: Analyze, sanitised screen, validated actions.
+Punchline: “The raw screenshot never leaves the machine unless it is already masked. Credentials cannot be filled. The model cannot write JavaScript.”
+
+SLIDE 3 — Technical approach
+Left: the 8 human-facing steps.
+Right: why four contexts exist.
+Tech stack bar: Chrome MV3, ONNX, YuNet 232 KB, DistilBERT q8, Tesseract, Express, mock or OpenAI-compatible LLM.
+One sentence: “Popup cannot read the tab. Worker cannot host WASM. Only the content script can keep a vault next to the live DOM.”
+
+SLIDE 4 — Feasibility
+Do not hide risks. Judges like honesty.
+Feasible: existing web tech, no native app, mock demo offline.
+Risks: Indic names, no pixel benchmark, Hybrid gap, novel IDs.
+Mitigations: checksums first, offscreen lazy models, dual gates, separate eval families.
+Sustainability: DPDP minimisation, extension scales machine → org → nationwide, swap planner without touching the vault.
+
+SLIDE 5 — Impact
+Social: DigiLocker / bank / gov portal without handing Aadhaar to a cloud VLM.
+Digital: agentic web that is a privacy proxy, not “upload the screen”.
+Environmental: 232 KB face model on-device vs shipping every frame to a GPU cluster.
+Government: matches ISRO’s brief — only non-sensitive structure leaves the client.
+
+SLIDE 6 — Research
+Workflow: PS → existing agents → layered stack → eval/safety/demo.
+Table: we are not claiming we beat password managers at storing passwords. We are claiming we are the only column that combines on-device vision, Indian checksums, masks, placeholders, and a closed agent.
+
+
+==================================================
+12. LIKELY JUDGE QUESTIONS  (prep answers)
+==================================================
+
+Q. Is data going to OpenAI / the cloud?
+A. Only after local redaction, and only if the user runs the agent. Analyze page/screen is local. The API key lives on the gateway, not in the extension. For the strongest demo we can run the mock provider with zero cloud.
+
+Q. Why YuNet, not a Vision Transformer as the PS says?
+A. The PS says “ViT or equivalent computer vision model”. YuNet is the equivalent that fits a browser: 232 KB, faces not COCO persons, boxes we can actually mask. A full ViT/VLM on-device would blow the resource score and still be worse at Aadhaar checksums.
+
+Q. Does Firefox work?
+A. Not claimed. chrome.offscreen and MV3 differences are untested. Chrome/Edge are the supported targets.
+
+Q. What about Hindi?
+A. Field labels: English + Devanagari keywords in the catalog. Person names in Hindi prose: not covered by DistilBERT. We state that as a limitation, not a feature.
+
+Q. Can the model steal the password?
+A. No vault entry is created for passwords/OTP/CVV. Fill of those fields is refused. The capability does not exist.
+
+Q. Prompt injection from the page?
+A. Page text is untrusted. It cannot add actions, selectors, or URLs. Residual risk remains; we constrain the output, we do not claim the model is unfoolable.
+
+Q. Hybrid vs sanitised image?
+A. Hybrid = local vision for privacy counts, no pixels to the LLM. Sanitised image = masked JPEG may go to the planner. Do not blur this.
+
+Q. 100% precision — is that real-world?
+A. It is 16 synthetic pages, rule-only, 0 false positives on that corpus. It is a regression gate, not a field trial. Say that.
+
+Q. Where is the vault stored?
+A. In the content script’s isolated world, in memory, for the tab session. Not chrome.storage, not disk, not logs, not the server.
+
+
+==================================================
+13. DO NOT SAY  (overclaim list)
+==================================================
+
+- “We never leak anything.”
+- “Our F1 is 90% for the whole system including faces and OCR.”
+- “We run a Vision Transformer in the popup.”
+- “Firefox is supported.”
+- “Hindi names are solved.”
+- “Hybrid sends the screenshot.”
+- “The LLM can execute any command.”
+- “YuNet identifies the person / detects Aadhaar cards.”
+- “API keys are in the extension.”
+
+Instead say:
+“We reduce leakage with mechanical gates. We measure rules separately from models. The model proposes; the extension authorises.”
+
+
+==================================================
+14. WHO SAYS WHAT  (suggested split)
+==================================================
+
+Speaker A — problem + pitch + slide 1–2
+  ISRO brief, why raw screenshots are unacceptable, 5 features vs challenges.
+
+Speaker B — architecture + models + slide 3
+  Four contexts, layers A/B/C, YuNet / DistilBERT / checksums, why not one giant model.
+
+Speaker C — feasibility, impact, numbers + slide 4–5
+  Honest risks, 16-page metrics, DPDP / ISRO fit, demo metrics (latency if you have a run).
+
+Speaker D — demo operator
+  Does not talk much. Runs Analyze, shows placeholders, shows masked face, runs agent, shows password still empty, shows action log.
+
+Anyone leftover
+  Slide 6 table + Q&A backup on identifiers and vault.
+
+
+==================================================
+15. 30-SECOND CLOSING
+==================================================
+
+ISRO asked for a light-weight browser agent that can see the screen without uploading Indian citizens’ identity.
+Tesseract is that privacy proxy: checksum-grade detection on-device, faces masked locally, a vault that never leaves the tab, and a planner that is only allowed to click and fill what we already sanitised.
+The reasoning can live in the cloud. The secrets cannot.
+
+
+==================================================
+16. QUICK CHEAT SHEET
+==================================================
+
+Team: Tesseract BTW
+PS: 26171  ISRO  Software  Smart Automation
+Product: Privacy-Preserving Browser Agent
+Ext version: 0.7.0
+Contexts: popup, service worker, content script, offscreen
+Face: YuNet ~232 KB
+Names: DistilBERT NER q8, English
+OCR: Tesseract.js, selective
+IDs: Verhoeff / Luhn / GSTIN / PAN / IFSC
+Gateway: 127.0.0.1:4317
+Planner: mock or OpenAI-compatible (Qwen / gpt-4o-mini)
+Actions: closed JSON only
+Turns: 6 max / 90 s
+Eval: 16 pages, 46 TP, 0 FP, 10 FN, P=100%, F1=90.2% (rules only)
+Vault: tab-local, never on the wire
+Credentials: one-way, cannot be restored
+
+If your mind goes blank, say the pitch and point at the trust boundary:
+“The vault stays in the content script. The model never sees it.”

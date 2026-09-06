@@ -35,6 +35,10 @@ export function run(utils, t) {
       {
         text: "person@example.com",
         boundingBox: { x: 90, y: 40, width: 20, height: 10 }
+      },
+      {
+        text: "789012345674",
+        boundingBox: { x: 32, y: 32, width: 12, height: 8 }
       }
     ]
   };
@@ -46,13 +50,14 @@ export function run(utils, t) {
     [["faces_people"], ["faces_people"]]
   );
   t.eq(
-    "generic OCR is scoped to image and canvas pixels",
+    "OCR masks identifiers, not every painted word",
     result.ocrItems.map((item) => item.sensitivityCategories),
     [
-      ["image_embedded_text"],
       [],
-      ["image_embedded_text", "canvas_text"],
-      ["email"]
+      [],
+      [],
+      ["email"],
+      ["aadhaar", "image_embedded_text"]
     ]
   );
 

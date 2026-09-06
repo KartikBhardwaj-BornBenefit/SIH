@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-09-03T16:21:15.354Z",
+  "recordedAt": "2026-09-04T08:43:44.506Z",
   "note": "Detection metrics only. Visibility is not exercised here; see eval/lib/dom.mjs. Update with: npm run eval -- --update",
   "pages": 16,
   "metrics": {
@@ -21,7 +21,7 @@
         "f1": 1
       },
       "address": {
-        "tp": 4,
+        "tp": 2,
         "fp": 0,
         "fn": 0,
         "precision": 1,
@@ -110,6 +110,14 @@
       },
       "phone": {
         "tp": 6,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1,
+        "recall": 1,
+        "f1": 1
+      },
+      "pin_code": {
+        "tp": 2,
         "fp": 0,
         "fn": 0,
         "precision": 1,

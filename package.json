@@ -9,7 +9,7 @@
     "build": "node scripts/build-vision.mjs",
     "postinstall": "node scripts/build-vision.mjs",
     "eval": "node eval/run.mjs",
-    "lint": "node --check src/background/serviceWorker.js && node --check src/popup/popup.js && node --check src/agent/protocol.js && node --check src/privacy/sanitizer.js && node --check server/index.mjs",
+    "lint": "node --check src/background/serviceWorker.js && node --check src/popup/popup.js && node --check src/popup/screenshotFrames.js && node --check src/popup/screenshotGallery.js && node --check src/agent/protocol.js && node --check src/privacy/sanitizer.js && node --check src/privacy/profileVault.js && node --check server/index.mjs",
     "server": "node server/index.mjs",
     "test:server": "node --test test/server.test.mjs",
     "test:safety": "node --test test/safety.test.mjs",

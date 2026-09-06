@@ -42,6 +42,16 @@
  * @property {number} byteLength
  * @property {object} redaction Counts and method only; no pixel text
  *
+ * @typedef {object} SanitizedScreenshotFrame
+ * One capture from an agent turn. Titles and URLs come from the already
+ * redacted page snapshot, never the live tab title.
+ * @property {number} step 1-based agent turn
+ * @property {string} title Redacted page title
+ * @property {string} url Redacted page URL
+ * @property {boolean} transmitted True only in sanitized-image mode
+ * @property {number} [capturedAt] Epoch ms when the JPEG was recorded
+ * @property {SanitizedScreenshot} screenshot Sanitizer-branded JPEG
+ *
  * @typedef {object} RedactionRecord
  * @property {string} placeholder e.g. `<EMAIL_2>`
  * @property {string} category Catalog id
@@ -128,6 +138,8 @@
  * @property {string} title
  * @property {string} url
  * @property {string} [lang]
+ * @property {{present: true, blocking: boolean, kind: string}} [authGate]
+ *   Value-free: an OTP/PIN/CVV field the agent must not type is on the page.
  *
  * @typedef {object} ExtractionLimits
  * @property {number} iframeCount Iframes exist but are not descended into

@@ -244,6 +244,14 @@ test("unpacked extension completes the offline SIH demo through the mock server"
       error: document.getElementById("agent-error").textContent
     }));
     logE2e("agentState", agentState);
+    const gallery = await popup.evaluate(() => ({
+      note: document.getElementById("agent-image-note").textContent,
+      thumbs: document.querySelectorAll("#agent-screenshot-strip button").length,
+      openHidden: document.getElementById("agent-open-gallery").hidden
+    }));
+    assert.match(gallery.note, /DOM-only mode/);
+    assert.equal(gallery.thumbs, 0);
+    assert.equal(gallery.openHidden, true);
     await demo.bringToFront();
     await demo.locator("#completion").waitFor({ state: "visible" });
     assert.equal(await demo.locator('input[type="password"]').inputValue(), "");

@@ -3,6 +3,7 @@ const ALLOWED_TOP_LEVEL = new Set([
   "mode",
   "goal",
   "context",
+  "profile",
   "privacyManifest",
   "screenshot",
   "history",
@@ -16,7 +17,7 @@ function plainObject(value) {
 function containsForbiddenKey(value) {
   if (!plainObject(value) && !Array.isArray(value)) return false;
   return Object.entries(value).some(([key, child]) => {
-    if (/^(?:vault|original|rawScreenshot|rawOcr|imageDataUrl)$/i.test(key)) return true;
+    if (/^(?:vault|original|rawScreenshot|rawOcr|imageDataUrl|profileVault|profileValues|sessionVault)$/i.test(key)) return true;
     return containsForbiddenKey(child);
   });
 }
@@ -67,6 +68,21 @@ export function validateAgentRequest(body, options = {}) {
   }
   if (body.history && (!Array.isArray(body.history) || body.history.length > 12)) {
     return { ok: false, error: "Action history is invalid." };
+  }
+  if (body.profile) {
+    if (!plainObject(body.profile) || !plainObject(body.profile.available) || !plainObject(body.profile.tokens)) {
+      return { ok: false, error: "Profile catalog is invalid." };
+    }
+    if (body.profile.values || body.profile.vault) {
+      return { ok: false, error: "Request contains a forbidden raw-data field." };
+    }
+    const tokenOk = Object.values(body.profile.tokens).every(
+      (token) => typeof token === "string" && /^<PROFILE_[A-Z][A-Z0-9_]*>$/.test(token)
+    );
+    const flagOk = Object.values(body.profile.available).every((flag) => flag === true || flag === false);
+    if (!tokenOk || !flagOk) {
+      return { ok: false, error: "Profile catalog is invalid." };
+    }
   }
   return { ok: true, value: body };
 }

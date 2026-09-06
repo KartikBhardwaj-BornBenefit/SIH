@@ -58,6 +58,35 @@ function safeOcrMetadata(ocr) {
   };
 }
 
+function downscaleDataUrl(dataUrl, maxEdge) {
+  return new Promise(function (resolve) {
+    var img = new Image();
+    img.onload = function () {
+      var width = img.naturalWidth || img.width;
+      var height = img.naturalHeight || img.height;
+      var edge = Math.max(width, height);
+      if (!maxEdge || edge <= maxEdge) {
+        resolve({ dataUrl: dataUrl, width: width, height: height });
+        return;
+      }
+      var scale = maxEdge / edge;
+      var canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(width * scale));
+      canvas.height = Math.max(1, Math.round(height * scale));
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve({
+        dataUrl: canvas.toDataURL("image/jpeg", 0.82),
+        width: canvas.width,
+        height: canvas.height
+      });
+    };
+    img.onerror = function () {
+      resolve({ dataUrl: dataUrl, width: 0, height: 0 });
+    };
+    img.src = dataUrl;
+  });
+}
+
 function imageSize(dataUrl) {
   return new Promise(function (resolve) {
     var img = new Image();
@@ -162,15 +191,24 @@ chrome.runtime.onMessage.addListener(function (message, _sender, sendResponse) {
       var totalStart = performance.now();
       try {
         await ensureLoaded(message.preferredDevice);
-        var size = await imageSize(message.imageDataUrl);
-        var vision = await visionEngine.analyze(message.imageDataUrl, size);
+        var scaled = await downscaleDataUrl(message.imageDataUrl, 1600);
+        var imageDataUrl = scaled.dataUrl;
+        var size = { width: scaled.width, height: scaled.height };
+        if (!size.width || !size.height) {
+          size = await imageSize(imageDataUrl);
+        }
+        var vision = await visionEngine.analyze(imageDataUrl, size);
         var ocr = null;
         if (message.runOcr) {
-          if (!ocrReady) {
-            await ocrEngine.init();
-            ocrReady = true;
+          try {
+            if (!ocrReady) {
+              await ocrEngine.init();
+              ocrReady = true;
+            }
+            ocr = await ocrEngine.extractText(imageDataUrl);
+          } catch (ocrError) {
+            ocr = null;
           }
-          ocr = await ocrEngine.extractText(message.imageDataUrl);
         }
         var sensitivity = globalThis.BrowserAgent && globalThis.BrowserAgent.sensitivity;
         if (sensitivity && sensitivity.annotatePixelSensitivity) {
@@ -193,7 +231,7 @@ chrome.runtime.onMessage.addListener(function (message, _sender, sendResponse) {
             vision,
             ocr
           );
-          sanitization = await sanitizeScreenshot(message.imageDataUrl, normalized, {
+          sanitization = await sanitizeScreenshot(imageDataUrl, normalized, {
             quality: message.imageQuality,
             faceMode: message.faceMode
           });

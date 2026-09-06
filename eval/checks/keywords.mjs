@@ -45,10 +45,14 @@ export function run(BA, t) {
   t.eq("billing address is postal", hasAddress("Billing address"), true);
   t.eq("address line 1 is postal", hasAddress("Address line 1"), true);
   t.eq("attribute style address-line1", hasAddress("address-line1"), true);
-  t.eq("pin code is postal", hasAddress("PIN code"), true);
-  t.eq("pincode is postal", hasAddress("pincode"), true);
-  t.eq("postal code is postal", hasAddress("Postal code"), true);
-  t.eq("zip is postal", hasAddress("Zip"), true);
+  t.eq("concatenated address1 is postal", hasAddress("address1"), true);
+  t.eq("digit-prefixed 10address1 is postal", hasAddress("10address1"), true);
+  t.eq("concatenated address2 is postal", hasAddress("11address2"), true);
+  t.eq("pin code is pin_code", hits("PIN code").includes("pin_code"), true);
+  t.eq("pin code is not street address", hasAddress("PIN code"), false);
+  t.eq("pincode is pin_code", hits("pincode").includes("pin_code"), true);
+  t.eq("postal code is pin_code", hits("Postal code").includes("pin_code"), true);
+  t.eq("zip is pin_code", hits("Zip").includes("pin_code"), true);
 
   // A bare "postal" used to match on its own, which made a paragraph in
   // keyword-noise.html flag itself for describing the category.
@@ -79,4 +83,53 @@ export function run(BA, t) {
     false
   );
   t.eq("hindi username is a username", hits("उपयोगकर्ता नाम").includes("username"), true);
+
+  t.eq(
+    "card user name is not a username",
+    hits("Card User Name").includes("username"),
+    false
+  );
+  t.eq(
+    "card user name is card_holder_name",
+    hits("Card User Name").includes("card_holder_name"),
+    true
+  );
+  t.eq(
+    "card customer service phone is not personal phone",
+    hits("Card Customer Service Phone").includes("phone"),
+    false
+  );
+  t.eq(
+    "card customer service phone is classified",
+    hits("Card Customer Service Phone").includes("card_service_phone"),
+    true
+  );
+  t.eq("ssn label", hits("Social Security Number").includes("ssn"), true);
+  t.eq("driver license label", hits("Driver License Number").includes("driver_license"), true);
+  t.eq("sex label", hits("Sex").includes("sex"), true);
+  t.eq("age label", hits("Age").includes("age"), true);
+  t.eq("birth place label", hits("Birth Place").includes("birth_place"), true);
+  t.eq("income label", hits("Income").includes("income"), true);
+  t.eq("custom message label", hits("Custom Message").includes("custom_message"), true);
+  t.eq("comments label", hits("Comments").includes("comments"), true);
+  t.eq("title label is person_title", hits("Title").includes("person_title"), true);
+  t.eq("job title is not honorific title", hits("Job Title").includes("person_title"), false);
+  t.eq("job title is position", hits("Job Title").includes("position"), true);
+  t.eq("position label", hits("Position").includes("position"), true);
+  t.eq("company label", hits("Company").includes("company"), true);
+  t.eq("company is not postal address", hits("Company").includes("address"), false);
+  t.eq("company domain is not company field", hits("r.iyer@company.co.in").includes("company"), false);
+  t.eq("middle initial label", hits("Middle Initial").includes("middle_initial"), true);
+  t.eq("country label", hits("Country").includes("country"), true);
+  t.eq("fax label", hits("Fax").includes("fax"), true);
+  t.eq("fax is not personal phone", hits("Fax").includes("phone"), false);
+  t.eq("cell phone is personal phone", hits("Cell Phone").includes("phone"), true);
+  t.eq("user id is username", hits("User ID").includes("username"), true);
+  t.eq("credit card type", hits("Credit Card Type").includes("card_type"), true);
+  t.eq("web site label", hits("Web Site").includes("website"), true);
+  t.eq("security pin label", hits("Enter 6 digit security PIN").includes("security_pin"), true);
+  t.eq("security pin is not otp", hits("Enter 6 digit security PIN").includes("otp"), false);
+  t.eq("security pin is not postal pin", hits("Enter 6 digit security PIN").includes("pin_code"), false);
+  t.eq("otp is not security pin", hits("OTP").includes("security_pin"), false);
+  t.eq("postal pin code is not security pin", hits("PIN code").includes("security_pin"), false);
 }

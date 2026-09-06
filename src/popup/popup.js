@@ -5,7 +5,9 @@
 
 var analyzeButton = document.getElementById("analyze-button");
 var analyzeLabel = document.getElementById("analyze-label");
+var statusBoxEl = document.getElementById("status-box");
 var statusEl = document.getElementById("status");
+var replacementListEl = document.getElementById("replacement-list");
 var emptyEl = document.getElementById("empty");
 var resultsEl = document.getElementById("results");
 var readableEl = document.getElementById("readable");
@@ -22,22 +24,102 @@ var contextModeEl = document.getElementById("context-mode");
 var latestSnapshot = null;
 var latestRedaction = null;
 var latestNer = null;
+var popupAgentTabId = null;
+
+function agentStatusForThisTab(message) {
+  if (popupAgentTabId == null) {
+    return false;
+  }
+  if (message && message.tabId != null && Number(message.tabId) !== Number(popupAgentTabId)) {
+    return false;
+  }
+  return true;
+}
+
+function requestAgentStatus(callback) {
+  chrome.runtime.sendMessage({ type: "AGENT_STATUS", tabId: popupAgentTabId }, callback);
+}
 
 function clearVault() {
   latestRedaction = null;
   latestNer = null;
 }
 
-function setStatus(message, isError) {
-  if (!message) {
-    statusEl.hidden = true;
-    statusEl.textContent = "";
-    statusEl.classList.remove("is-error");
+function uniqueReplacements(redaction) {
+  var records = (redaction && redaction.records) || [];
+  var seen = {};
+  var out = [];
+  records.forEach(function (record) {
+    if (!record || !record.placeholder || seen[record.placeholder]) {
+      return;
+    }
+    seen[record.placeholder] = true;
+    out.push(record);
+  });
+  return out;
+}
+
+function categoryLabel(categoryId) {
+  var cats = (BrowserAgent && BrowserAgent.SENSITIVITY_CATEGORIES) || [];
+  for (var i = 0; i < cats.length; i++) {
+    if (cats[i].id === categoryId) {
+      return cats[i].label;
+    }
+  }
+  if (categoryId === "truncated_text") {
+    return "Truncated text";
+  }
+  return String(categoryId || "value").replace(/_/g, " ");
+}
+
+function replacementNote(record) {
+  var label = categoryLabel(record.category);
+  if (record.oneWay) {
+    return label + " · not recoverable";
+  }
+  if (record.confidence === "checksum") {
+    return label + " · checksum";
+  }
+  if (record.confidence === "model") {
+    return label + " · name model";
+  }
+  if (record.confidence === "structure" || record.confidence === "shape") {
+    return label + " · " + record.confidence;
+  }
+  return label;
+}
+
+function renderReplacementList(records) {
+  if (!replacementListEl) {
     return;
   }
-  statusEl.hidden = false;
+  replacementListEl.replaceChildren();
+  if (!records || !records.length) {
+    replacementListEl.hidden = true;
+    return;
+  }
+  replacementListEl.hidden = false;
+  records.forEach(function (record) {
+    var item = node("li", "replacement-item");
+    item.appendChild(node("code", "replacement-token", record.placeholder));
+    item.appendChild(node("span", "replacement-kind", replacementNote(record)));
+    replacementListEl.appendChild(item);
+  });
+}
+
+function setStatus(message, isError, replacementRecords) {
+  var box = statusBoxEl || statusEl;
+  if (!message) {
+    box.hidden = true;
+    statusEl.textContent = "";
+    box.classList.remove("is-error");
+    renderReplacementList([]);
+    return;
+  }
+  box.hidden = false;
   statusEl.textContent = message;
-  statusEl.classList.toggle("is-error", Boolean(isError));
+  box.classList.toggle("is-error", Boolean(isError));
+  renderReplacementList(!isError && replacementRecords ? replacementRecords : []);
 }
 
 function setLoading(isLoading) {
@@ -139,7 +221,7 @@ function elementBadge(element) {
 function renderReadable(snapshot) {
   readableEl.replaceChildren();
 
-  if (snapshot.limits.iframeCount > 0) {
+  if (snapshot.limits && snapshot.limits.iframeCount > 0) {
     readableEl.appendChild(
       node(
         "p",
@@ -151,7 +233,7 @@ function renderReadable(snapshot) {
     );
   }
 
-  if (!snapshot.elements.length) {
+  if (!(snapshot.elements && snapshot.elements.length)) {
     readableEl.appendChild(node("p", "empty-list", "No matching elements were found."));
     return;
   }
@@ -207,41 +289,38 @@ function renderRedactionStats(snapshot, ner) {
     }
     nerEl.textContent = String(modelHits);
   }
-  if (revealToggle) {
-    revealToggle.disabled = !sessionVault || !Object.keys(sessionVault).length;
-  }
 }
 
 function renderSnapshot(snapshot, ner) {
+  if (!snapshot) {
+    throw new Error("The tab returned no snapshot.");
+  }
   latestSnapshot = snapshot;
   latestNer = ner || null;
-  document.getElementById("count-elements").textContent = String(snapshot.counts.elements);
-  document.getElementById("count-interactive").textContent = String(snapshot.counts.interactive);
+  var counts = snapshot.counts || {};
+  document.getElementById("count-elements").textContent = String(counts.elements || 0);
+  document.getElementById("count-interactive").textContent = String(counts.interactive || 0);
   document.getElementById("count-sensitive").textContent = String(
-    snapshot.counts.sensitive + snapshot.counts.potentiallySensitive
+    (counts.sensitive || 0) + (counts.potentiallySensitive || 0)
   );
-  document.getElementById("stat-found").textContent = String(snapshot.counts.found || 0);
-  document.getElementById("stat-visible").textContent = String(snapshot.counts.visible || 0);
-  document.getElementById("stat-viewport").textContent = String(snapshot.counts.inViewport || 0);
+  document.getElementById("stat-found").textContent = String(counts.found || 0);
+  document.getElementById("stat-visible").textContent = String(counts.visible || 0);
+  document.getElementById("stat-viewport").textContent = String(counts.inViewport || 0);
   document.getElementById("stat-interactive-visible").textContent = String(
-    snapshot.counts.interactiveVisible || 0
+    counts.interactiveVisible || 0
   );
-  document.getElementById("stat-value-matched").textContent = String(
-    snapshot.counts.valueMatched || 0
-  );
-  document.getElementById("stat-checksum").textContent = String(
-    snapshot.counts.checksumVerified || 0
-  );
+  document.getElementById("stat-value-matched").textContent = String(counts.valueMatched || 0);
+  document.getElementById("stat-checksum").textContent = String(counts.checksumVerified || 0);
   renderRedactionStats(snapshot, ner);
   updateNerStatus(ner);
-  pageTitleEl.textContent = snapshot.page.title || "(untitled)";
-  pageUrlEl.textContent = snapshot.page.url || "";
+  pageTitleEl.textContent = (snapshot.page && snapshot.page.title) || "(untitled)";
+  pageUrlEl.textContent = (snapshot.page && snapshot.page.url) || "";
   pageFlagsEl.textContent =
     (snapshot.mode === "viewport" ? "Current Viewport" : "Visible DOM") +
     " · " +
-    snapshot.counts.sensitive +
+    (counts.sensitive || 0) +
     " sensitive · " +
-    snapshot.counts.potentiallySensitive +
+    (counts.potentiallySensitive || 0) +
     " potentially sensitive";
   renderReadable(snapshot);
   jsonEl.textContent = JSON.stringify(snapshot, null, 2);
@@ -283,11 +362,11 @@ function analyzeCurrentPage() {
 
       latestRedaction = response.redaction || null;
 
-      var replaced = (latestRedaction && latestRedaction.counts.replacements) || 0;
+      var replacements = uniqueReplacements(latestRedaction);
       var ner = response.ner || null;
       var statusBits = [];
-      if (replaced) {
-        statusBits.push(replaced + " value(s) replaced with placeholders.");
+      if (replacements.length) {
+        statusBits.push(replacements.length + " value(s) replaced with placeholders.");
       }
       if (ner && ner.ok) {
         statusBits.push(
@@ -300,10 +379,18 @@ function analyzeCurrentPage() {
       setStatus(
         statusBits.length
           ? "Snapshot created locally. " + statusBits.join(" ")
-          : "Snapshot created locally. Nothing was uploaded."
+          : "Snapshot created locally. Nothing was uploaded.",
+        false,
+        replacements
       );
-      renderSnapshot(response.snapshot, ner);
-      showReadable();
+      try {
+        renderSnapshot(response.snapshot, ner);
+        showReadable();
+      } catch (error) {
+        emptyEl.hidden = false;
+        resultsEl.hidden = true;
+        setStatus(error && error.message ? error.message : "Could not render the snapshot.", true);
+      }
     }
   );
 }
@@ -467,7 +554,22 @@ function shouldRedactElement(element, ids) {
   if (!element || !element.id) {
     return false;
   }
-  return Boolean(ids[element.id]);
+  if (!ids[element.id]) {
+    return false;
+  }
+  var tag = String(element.tag || "").toLowerCase();
+  var kind = String(element.kind || "").toLowerCase();
+  if (
+    tag === "img" ||
+    tag === "canvas" ||
+    tag === "video" ||
+    kind === "image" ||
+    kind === "canvas" ||
+    kind === "video"
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function elementCssBox(element, viewport) {
@@ -745,19 +847,28 @@ function analyzeCurrentScreen() {
         setStatus((response && response.error) || "Local vision failed.", true);
         return;
       }
-      setStatus(
-        response.ocrPlan && response.ocrPlan.run
-          ? "Local vision and OCR finished. Screenshot stayed on this device."
-          : "Local vision finished. OCR skipped because the viewport DOM exposed no image, canvas, or video."
-      );
       // Records arrive on this path but the vault does not, so a vision run
       // can draw masks without being able to reveal anything.
       latestRedaction = response.redaction || null;
-      if (response.snapshot) {
-        renderSnapshot(response.snapshot, response.ner);
-        showReadable();
+      setStatus(
+        response.ocrPlan && response.ocrPlan.run
+          ? "Local vision and OCR finished. Screenshot stayed on this device."
+          : "Local vision finished. OCR skipped because the viewport DOM exposed no image, canvas, or video.",
+        false,
+        uniqueReplacements(latestRedaction)
+      );
+      try {
+        if (response.snapshot) {
+          renderSnapshot(response.snapshot, response.ner);
+          showReadable();
+        }
+        renderVision(response);
+      } catch (error) {
+        emptyEl.hidden = false;
+        resultsEl.hidden = true;
+        visionResultsEl.hidden = true;
+        setStatus(error && error.message ? error.message : "Could not render vision results.", true);
       }
-      renderVision(response);
     }
   );
 }
@@ -772,8 +883,44 @@ if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessag
     if (message && message.type === "OFFSCREEN_NER_STATUS") {
       updateNerStatus(message);
     }
-    if (message && message.type === "AGENT_STATUS" && message.entry) {
-      appendAgentLog(message.entry);
+    if (message && message.type === "AGENT_STATUS") {
+      if (!agentStatusForThisTab(message)) {
+        return;
+      }
+      if (message.entry) {
+        appendAgentLog(message.entry);
+      }
+      if (message.goal && agentGoalEl && !agentGoalEl.value.trim()) {
+        agentGoalEl.value = message.goal;
+      }
+      if (message.status === "waiting_for_user") {
+        setAgentChrome("waiting", message.authGate);
+      } else if (message.status === "running") {
+        setAgentChrome("running");
+      } else if (message.status === "stopped") {
+        setAgentChrome("stopped");
+      } else if (message.finished || message.status === "done" || message.status === "error") {
+        requestAgentStatus(function (response) {
+          if (!response || chrome.runtime.lastError) {
+            finishAgentState({
+              ok: message.status === "done",
+              error: message.status === "error" ? "Agent failed." : "",
+              status: message.status
+            });
+            return;
+          }
+          renderAgentResult(response, response.analysisMode || agentModeEl.value);
+          finishAgentState(response);
+        });
+      }
+      if (message.screenshotCount) {
+        requestAgentStatus(function (response) {
+          if (!response || chrome.runtime.lastError) {
+            return;
+          }
+          renderAgentResult(response, response.analysisMode || agentModeEl.value);
+        });
+      }
     }
   });
 }
@@ -782,27 +929,101 @@ var agentGoalEl = document.getElementById("agent-goal");
 var agentModeEl = document.getElementById("agent-mode");
 var agentRunEl = document.getElementById("agent-run");
 var agentStopEl = document.getElementById("agent-stop");
+var agentPauseEl = document.getElementById("agent-pause");
+var agentContinueEl = document.getElementById("agent-continue");
+var agentGateEl = document.getElementById("agent-gate");
+var agentGateTitleEl = document.getElementById("agent-gate-title");
+var agentGateCopyEl = document.getElementById("agent-gate-copy");
 var agentStateEl = document.getElementById("agent-state");
 var agentErrorEl = document.getElementById("agent-error");
 var agentOutputEl = document.getElementById("agent-output");
 var agentLogEl = document.getElementById("agent-log");
 var agentPreviewEl = document.getElementById("agent-sanitized-preview");
 var agentImageNoteEl = document.getElementById("agent-image-note");
+var agentScreenshotStripEl = document.getElementById("agent-screenshot-strip");
+var agentOpenGalleryEl = document.getElementById("agent-open-gallery");
 var agentContextEl = document.getElementById("agent-context-preview");
 var agentPrivacyEl = document.getElementById("agent-privacy-summary");
 var agentTimingsEl = document.getElementById("agent-timings");
 var privacySubtitleEl = document.getElementById("privacy-subtitle");
 var privacyPillEl = document.getElementById("privacy-pill");
+var agentScreenshotFrames = [];
+var selectedShotIndex = 0;
 
-function setAgentRunning(running) {
-  agentRunEl.disabled = running;
-  agentStopEl.disabled = !running;
-  agentStateEl.textContent = running ? "Running" : "Idle";
+function renderAuthGate(authGate) {
+  if (!agentGateEl) {
+    return;
+  }
+  if (!authGate) {
+    return;
+  }
+  if (agentGateTitleEl && authGate.title) {
+    agentGateTitleEl.textContent = authGate.title;
+  }
+  if (agentGateCopyEl && authGate.detail) {
+    agentGateCopyEl.textContent = authGate.detail;
+  }
+}
+
+function setAgentChrome(state, authGate) {
+  var running = state === "running";
+  var waiting = state === "waiting" || state === "waiting_for_user";
+  var busy = running || waiting;
+  agentRunEl.disabled = busy;
+  agentStopEl.disabled = !busy;
+  if (agentContinueEl) {
+    agentContinueEl.disabled = !waiting;
+    if (authGate && authGate.kind === "manual") {
+      agentContinueEl.textContent = "Resume agent";
+    } else {
+      agentContinueEl.textContent = "I've finished — continue";
+    }
+  }
+  if (agentPauseEl) {
+    agentPauseEl.disabled = !busy;
+    agentPauseEl.textContent = waiting ? "Resume" : "Pause for input";
+  }
+  if (agentGateEl) {
+    agentGateEl.hidden = !waiting;
+  }
+  if (waiting) {
+    renderAuthGate(authGate);
+  }
   agentStateEl.classList.toggle("is-running", running);
+  agentStateEl.classList.toggle("is-waiting", waiting);
+  agentStateEl.classList.toggle("is-error", state === "error");
   if (running) {
+    agentStateEl.textContent = "Running";
     privacySubtitleEl.textContent = "Agent mode · only sanitized context is transmitted";
     privacyPillEl.lastChild.textContent = " Agent";
+    return;
   }
+  if (waiting) {
+    agentStateEl.textContent = "Waiting";
+    privacySubtitleEl.textContent =
+      authGate && authGate.kind === "manual"
+        ? "Paused — type in the tab, then resume"
+        : "Paused for a code only you can enter";
+    privacyPillEl.lastChild.textContent = " Agent";
+    return;
+  }
+  if (state === "stopped") {
+    agentStateEl.textContent = "Stopped";
+    return;
+  }
+  if (state === "error") {
+    agentStateEl.textContent = "Error";
+    return;
+  }
+  if (state === "done" || state === "complete") {
+    agentStateEl.textContent = "Complete";
+    return;
+  }
+  agentStateEl.textContent = "Idle";
+}
+
+function setAgentRunning(running) {
+  setAgentChrome(running ? "running" : "idle");
 }
 
 function appendAgentLog(entry) {
@@ -846,6 +1067,7 @@ function renderAgentTimings(timings) {
     redactionMs: "Pixel redaction",
     serverMs: "Server",
     totalAgentMs: "Total",
+    waitedForUserMs: "Waited for you",
     totalClientMs: "Client total",
     payloadBytes: "Payload",
     sanitizedImageBytes: "Sanitized image",
@@ -870,37 +1092,102 @@ function renderAgentTimings(timings) {
   });
 }
 
+function renderScreenshotGallery(analysisMode) {
+  var api = BrowserAgent.screenshotFrames;
+  var frames = agentScreenshotFrames;
+  if (!api || !agentPreviewEl || !agentImageNoteEl) {
+    return;
+  }
+  if (!frames.length) {
+    agentPreviewEl.removeAttribute("src");
+    agentPreviewEl.hidden = true;
+    if (agentScreenshotStripEl) {
+      agentScreenshotStripEl.replaceChildren();
+      agentScreenshotStripEl.hidden = true;
+    }
+    if (agentOpenGalleryEl) {
+      agentOpenGalleryEl.hidden = true;
+    }
+    agentImageNoteEl.hidden = false;
+    agentImageNoteEl.textContent = api.emptyNote(analysisMode);
+    return;
+  }
+  if (selectedShotIndex < 0 || selectedShotIndex >= frames.length) {
+    selectedShotIndex = frames.length - 1;
+  }
+  var selected = frames[selectedShotIndex];
+  agentPreviewEl.src = selected.screenshot.dataUrl;
+  agentPreviewEl.hidden = false;
+  agentImageNoteEl.hidden = false;
+  agentImageNoteEl.textContent = api.note(selected, analysisMode, frames.length);
+  if (agentOpenGalleryEl) {
+    agentOpenGalleryEl.hidden = false;
+  }
+  if (!agentScreenshotStripEl) {
+    return;
+  }
+  agentScreenshotStripEl.replaceChildren();
+  if (frames.length < 2) {
+    agentScreenshotStripEl.hidden = true;
+    return;
+  }
+  agentScreenshotStripEl.hidden = false;
+  frames.forEach(function (frame, index) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "agent-shot-thumb" + (index === selectedShotIndex ? " is-selected" : "");
+    var img = document.createElement("img");
+    img.src = frame.screenshot.dataUrl;
+    img.alt = api.label(frame);
+    var badge = document.createElement("span");
+    badge.className = "agent-shot-step";
+    badge.textContent = String(index + 1);
+    button.appendChild(img);
+    button.appendChild(badge);
+    button.addEventListener("click", function () {
+      selectedShotIndex = index;
+      renderScreenshotGallery(analysisMode);
+    });
+    agentScreenshotStripEl.appendChild(button);
+  });
+}
+
 function renderAgentResult(response, analysisMode) {
   agentOutputEl.hidden = false;
   if (response && response.snapshot) {
     agentContextEl.textContent = JSON.stringify(response.snapshot, null, 2);
   }
-  var screenshot = response && response.sanitizedScreenshot;
-  if (screenshot && screenshot.dataUrl) {
-    agentPreviewEl.src = screenshot.dataUrl;
-    agentPreviewEl.hidden = false;
-    agentImageNoteEl.hidden = false;
-    agentImageNoteEl.textContent =
-      analysisMode === "sanitized-image"
-        ? "This sanitized image was eligible for transmission."
-        : "This sanitized preview stayed local; only structured context was sent.";
-  } else {
-    agentPreviewEl.removeAttribute("src");
-    agentPreviewEl.hidden = true;
-    agentImageNoteEl.hidden = false;
-    agentImageNoteEl.textContent = "No screenshot was captured or transmitted in DOM-only mode.";
-  }
+  var mode = analysisMode || (response && response.analysisMode) || agentModeEl.value;
+  agentScreenshotFrames = BrowserAgent.screenshotFrames
+    ? BrowserAgent.screenshotFrames.listFrom(response)
+    : [];
+  selectedShotIndex = Math.max(0, agentScreenshotFrames.length - 1);
+  renderScreenshotGallery(mode);
   renderPrivacyManifest(response && response.privacyManifest);
   renderAgentTimings(response && response.timings);
 }
 
 function finishAgentState(response) {
-  setAgentRunning(false);
-  var status = response && response.ok ? "Complete" : (response && /stopped/i.test(response.error || "") ? "Stopped" : "Error");
-  agentStateEl.textContent = status;
-  agentStateEl.classList.toggle("is-error", status === "Error");
-  agentErrorEl.hidden = Boolean(response && response.ok);
-  agentErrorEl.textContent = response && !response.ok ? response.error || "Agent failed." : "";
+  var raw = (response && response.status) || "";
+  if (raw === "waiting_for_user") {
+    setAgentChrome("waiting", response.authGate);
+    return;
+  }
+  if (raw === "running") {
+    setAgentChrome("running");
+    return;
+  }
+  var status = "idle";
+  if (raw === "done" || (response && response.ok && raw !== "error" && raw !== "stopped")) {
+    status = "complete";
+  } else if (raw === "stopped" || (response && /stopped/i.test(response.error || ""))) {
+    status = "stopped";
+  } else if (raw === "error" || (response && response.ok === false)) {
+    status = "error";
+  }
+  setAgentChrome(status);
+  agentErrorEl.hidden = status !== "error";
+  agentErrorEl.textContent = status === "error" ? (response && response.error) || "Agent failed." : "";
 }
 
 agentRunEl.addEventListener("click", function () {
@@ -914,7 +1201,7 @@ agentRunEl.addEventListener("click", function () {
   if (
     shouldConfirm &&
     !window.confirm(
-      "Run agent mode? Only locally sanitized context—and a sanitized image in image mode—will be sent to the configured agent server."
+      "Run agent mode? Only locally sanitized context and profile availability tokens will be sent. Real Aadhaar, email, and other profile values stay on this device."
     )
   ) {
     return;
@@ -926,9 +1213,21 @@ agentRunEl.addEventListener("click", function () {
   ) {
     allowDestructive = false;
   }
+  var allowHighRiskProfile = document.getElementById("allow-profile-high-risk").checked;
+  if (
+    allowHighRiskProfile &&
+    !window.confirm(
+      "Allow this run to type Aadhaar, PAN, passport, GSTIN, or payment profile values into matching fields on the current page?"
+    )
+  ) {
+    allowHighRiskProfile = false;
+  }
 
   agentErrorEl.hidden = true;
   agentLogEl.replaceChildren();
+  agentScreenshotFrames = [];
+  selectedShotIndex = 0;
+  renderScreenshotGallery(agentModeEl.value);
   agentOutputEl.hidden = false;
   setAgentRunning(true);
   var analysisMode = agentModeEl.value;
@@ -940,11 +1239,28 @@ agentRunEl.addEventListener("click", function () {
       contextMode: contextModeEl.value,
       sensitivityPolicy: SensitivityForm.getPolicy(),
       remoteConfirmed: true,
-      allowDestructive: allowDestructive
+      allowDestructive: allowDestructive,
+      allowHighRiskProfile: allowHighRiskProfile
     },
     function (response) {
       if (chrome.runtime.lastError) {
+        var disconnected = /message port closed|receiving end does not exist/i.test(
+          chrome.runtime.lastError.message || ""
+        );
+        if (disconnected) {
+          return;
+        }
         response = { ok: false, error: chrome.runtime.lastError.message };
+      }
+      if (response && response.accepted) {
+        if (response.goal) {
+          agentGoalEl.value = response.goal;
+        }
+        setAgentChrome(
+          response.status === "waiting_for_user" ? "waiting" : "running",
+          response.authGate
+        );
+        return;
       }
       (response && response.log || []).forEach(function (entry) {
         if (!agentLogEl.textContent.includes(entry.detail || "")) {
@@ -959,7 +1275,105 @@ agentRunEl.addEventListener("click", function () {
 
 agentStopEl.addEventListener("click", function () {
   chrome.runtime.sendMessage({ type: "STOP_AGENT" }, function () {
-    setAgentRunning(false);
-    agentStateEl.textContent = "Stopped";
+    setAgentChrome("stopped");
   });
 });
+
+if (agentPauseEl) {
+  agentPauseEl.addEventListener("click", function () {
+    chrome.runtime.sendMessage({ type: "TOGGLE_AGENT_PAUSE" }, function (response) {
+      if (chrome.runtime.lastError || !response || !response.ok) {
+        agentErrorEl.hidden = false;
+        agentErrorEl.textContent =
+          (response && response.error) ||
+          (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+          "Could not pause or resume the agent.";
+        return;
+      }
+      agentErrorEl.hidden = true;
+      agentErrorEl.textContent = "";
+    });
+  });
+}
+
+if (agentContinueEl) {
+  agentContinueEl.addEventListener("click", function () {
+    agentContinueEl.disabled = true;
+    chrome.runtime.sendMessage({ type: "CONTINUE_AGENT" }, function (response) {
+      if (chrome.runtime.lastError || !response || !response.ok) {
+        agentContinueEl.disabled = false;
+        agentErrorEl.hidden = false;
+        agentErrorEl.textContent =
+          (response && response.error) ||
+          (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+          "Could not continue the agent.";
+        return;
+      }
+      agentErrorEl.hidden = true;
+      agentErrorEl.textContent = "";
+    });
+  });
+}
+
+if (agentOpenGalleryEl) {
+  agentOpenGalleryEl.addEventListener("click", function () {
+    if (BrowserAgent.screenshotFrames) {
+      BrowserAgent.screenshotFrames.openViewer();
+    }
+  });
+}
+
+if (agentPreviewEl) {
+  agentPreviewEl.addEventListener("click", function () {
+    if (agentOpenGalleryEl && !agentOpenGalleryEl.hidden && BrowserAgent.screenshotFrames) {
+      BrowserAgent.screenshotFrames.openViewer();
+    }
+  });
+}
+
+function restoreLastAgentRun() {
+  if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) {
+    return;
+  }
+  var apply = function () {
+    requestAgentStatus(function (response) {
+      if (chrome.runtime.lastError || !response) {
+        return;
+      }
+      if (!response.status || response.status === "idle") {
+        return;
+      }
+      if (response.goal && agentGoalEl) {
+        agentGoalEl.value = response.goal;
+      }
+      agentOutputEl.hidden = false;
+      agentLogEl.replaceChildren();
+      (response.log || []).forEach(appendAgentLog);
+      renderAgentResult(response, response.analysisMode || agentModeEl.value);
+      if (response.status === "running") {
+        setAgentChrome("running");
+        return;
+      }
+      if (response.status === "waiting_for_user") {
+        setAgentChrome("waiting", response.authGate);
+        return;
+      }
+      finishAgentState({
+        ok: response.status === "done",
+        error: response.error,
+        status: response.status,
+        authGate: response.authGate
+      });
+    });
+  };
+  if (!chrome.tabs || !chrome.tabs.query) {
+    apply();
+    return;
+  }
+  chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+    popupAgentTabId = tabs && tabs[0] && tabs[0].id;
+    apply();
+  });
+}
+
+restoreLastAgentRun();

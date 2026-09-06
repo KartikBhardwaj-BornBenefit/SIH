@@ -91,6 +91,33 @@ function clampBox(box, image) {
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+function isPixelSurfaceElement(element) {
+  if (!element) {
+    return false;
+  }
+  var tag = String(element.tag || "").toLowerCase();
+  var kind = String(element.kind || "").toLowerCase();
+  return (
+    tag === "img" ||
+    tag === "canvas" ||
+    tag === "video" ||
+    kind === "image" ||
+    kind === "canvas" ||
+    kind === "video"
+  );
+}
+
+function boxCoversTooMuch(box, image) {
+  if (!box || !image) {
+    return false;
+  }
+  var imageArea = image.width * image.height;
+  if (!imageArea) {
+    return false;
+  }
+  return (box.width * box.height) / imageArea > 0.4;
+}
+
 function padBox(box, image, category) {
   var ratio = HIGH_RISK[category] ? 0.12 : 0.07;
   var minimum = HIGH_RISK[category] ? 8 : 5;
@@ -137,7 +164,7 @@ export function normalizeDetections(snapshot, redaction, vision, ocr) {
       return;
     }
     var box = clampBox(item.boundingBox, image);
-    if (!box) {
+    if (!box || boxCoversTooMuch(box, image)) {
       return;
     }
     detections.push(
@@ -188,9 +215,12 @@ export function normalizeDetections(snapshot, redaction, vision, ocr) {
       return;
     }
     var element = elementsById[record.elementId];
+    if (isPixelSurfaceElement(element)) {
+      return;
+    }
     var box = elementImageBox(element, image, snapshot && snapshot.viewport);
     box = clampBox(box, image);
-    if (!box) {
+    if (!box || boxCoversTooMuch(box, image)) {
       return;
     }
     seenDom[recordKey] = true;
@@ -216,13 +246,12 @@ export function normalizeDetections(snapshot, redaction, vision, ocr) {
   return detections;
 }
 
-function boxesTouch(a, b) {
-  var gap = 4;
+function boxesOverlap(a, b) {
   return !(
-    a.x + a.width + gap < b.x ||
-    b.x + b.width + gap < a.x ||
-    a.y + a.height + gap < b.y ||
-    b.y + b.height + gap < a.y
+    a.x + a.width < b.x ||
+    b.x + b.width < a.x ||
+    a.y + a.height < b.y ||
+    b.y + b.height < a.y
   );
 }
 
@@ -237,7 +266,7 @@ function mergeBoxes(boxes, image) {
     while (changed) {
       changed = false;
       for (var i = pending.length - 1; i >= 0; i--) {
-        if (!boxesTouch(current, pending[i])) {
+        if (!boxesOverlap(current, pending[i])) {
           continue;
         }
         var other = pending.splice(i, 1)[0];
@@ -252,6 +281,25 @@ function mergeBoxes(boxes, image) {
     merged.push(clampBox(current, image));
   }
   return merged.filter(Boolean);
+}
+
+function mergeBlackBoxes(padded, image) {
+  var groups = {};
+  padded.forEach(function (entry) {
+    if (!entry || entry.item.redactionPolicy !== "black") {
+      return;
+    }
+    var key = entry.item.category || "unknown";
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+    groups[key].push(entry.box);
+  });
+  var merged = [];
+  Object.keys(groups).forEach(function (key) {
+    merged.push.apply(merged, mergeBoxes(groups[key], image));
+  });
+  return merged;
 }
 
 function pixelate(context, sourceCanvas, box) {
@@ -326,14 +374,7 @@ export async function sanitizeScreenshot(originalDataUrl, normalized, options) {
     pixelate(context, canvas, entry.box);
   });
 
-  var blackBoxes = mergeBoxes(
-    padded.filter(function (entry) {
-      return entry.item.redactionPolicy === "black";
-    }).map(function (entry) {
-      return entry.box;
-    }),
-    image
-  );
+  var blackBoxes = mergeBlackBoxes(padded, image);
   context.fillStyle = "#000";
   blackBoxes.forEach(function (box) {
     context.fillRect(box.x, box.y, box.width, box.height);

@@ -24,12 +24,17 @@
   },
   "permissions": ["activeTab", "scripting", "offscreen", "unlimitedStorage", "storage"],
   "host_permissions": [
-    "https://huggingface.co/*",
-    "https://*.huggingface.co/*",
-    "https://*.hf.co/*",
-    "http://127.0.0.1/*",
-    "http://localhost/*"
+    "<all_urls>"
   ],
+  "commands": {
+    "toggle-agent-pause": {
+      "description": "Pause or resume the agent so you can type (OTP, password, etc.)",
+      "suggested_key": {
+        "default": "Ctrl+Shift+U",
+        "mac": "Command+Shift+U"
+      }
+    }
+  },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
   }

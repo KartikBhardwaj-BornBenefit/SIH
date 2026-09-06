@@ -1,4 +1,6 @@
 node_modules/
+.env
+server/.env
 src/offscreen/offscreen.bundle.js
 src/offscreen/offscreen.bundle.js.map
 vendor/

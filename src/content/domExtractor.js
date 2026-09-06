@@ -26,6 +26,7 @@ var RELEVANT_SELECTOR = [
   "label",
   "summary",
   "[contenteditable='true']",
+  "[contenteditable]:not([contenteditable='false'])",
   "[role='button']",
   "[role='link']",
   "[role='textbox']",
@@ -34,8 +35,17 @@ var RELEVANT_SELECTOR = [
   "[role='radio']",
   "[role='combobox']",
   "[role='menuitem']",
+  "[role='listitem']",
+  "[role='row']",
+  "[role='option']",
+  "[role='gridcell']",
+  "[role='tab']",
   "[role='heading']",
-  "[role='img']"
+  "[role='img']",
+  "div[tabindex='0']",
+  "li[tabindex='0']",
+  "article[tabindex='0']",
+  "section[tabindex='0']"
 ].join(",");
 
 /**
@@ -75,6 +85,10 @@ var INTERACTIVE_ROLES = {
   radio: true,
   combobox: true,
   menuitem: true,
+  listitem: true,
+  row: true,
+  option: true,
+  gridcell: true,
   slider: true,
   switch: true,
   tab: true
@@ -95,26 +109,28 @@ function shortLabelText(node) {
 }
 
 function inferNearbyLabel(element) {
-  var prev = element.previousElementSibling;
-  while (prev) {
-    var direct = shortLabelText(prev);
-    if (direct) {
-      return direct;
+  var current = element;
+  var hops = 0;
+  while (current && hops < 6) {
+    var tag = String(current.tagName || "").toLowerCase();
+    if (tag === "body" || tag === "html") {
+      break;
     }
-    prev = prev.previousElementSibling;
+    var prev = current.previousElementSibling;
+    while (prev) {
+      var direct = shortLabelText(prev);
+      if (direct) {
+        return direct;
+      }
+      prev = prev.previousElementSibling;
+    }
+    current = current.parentElement;
+    hops += 1;
   }
 
   var parent = element.parentElement;
   if (!parent) {
     return "";
-  }
-
-  var parentPrev = parent.previousElementSibling;
-  if (parentPrev) {
-    var beside = shortLabelText(parentPrev);
-    if (beside) {
-      return beside;
-    }
   }
 
   var row = element.closest("tr");
@@ -154,11 +170,128 @@ function takesNameFromContext(element) {
   return Boolean(element.isContentEditable);
 }
 
+function isConversationRow(element) {
+  var role = (element.getAttribute("role") || "").toLowerCase();
+  return role === "listitem" || role === "row" || role === "option" || role === "gridcell";
+}
+
+function isPreviewLabel(text) {
+  return (
+    /\breacted\b/i.test(text) ||
+    /^(yesterday|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i.test(text) ||
+    /^\d{1,2}:\d{2}/.test(text)
+  );
+}
+
+function conversationLabel(element) {
+  if (!isConversationRow(element)) {
+    return "";
+  }
+  var spans = element.querySelectorAll("span, strong");
+  var i;
+  var own;
+  for (i = 0; i < spans.length; i++) {
+    own = BrowserAgent.text.normalizeText(spans[i].textContent || "");
+    if (
+      own.length >= 2 &&
+      own.length <= 48 &&
+      spans[i].querySelectorAll("span, div").length <= 2 &&
+      !isPreviewLabel(own)
+    ) {
+      return own;
+    }
+  }
+  var titled = BrowserAgent.text.normalizeText(element.getAttribute("title") || "");
+  if (titled && titled.length >= 2 && titled.length <= 80 && !/\breacted\b/i.test(titled)) {
+    return titled.split(/[.•·]/)[0].trim().slice(0, 48);
+  }
+  var raw = String(element.innerText || element.textContent || "");
+  var firstLine = BrowserAgent.text.normalizeText(raw.split("\n")[0] || "");
+  if (firstLine.length >= 2 && firstLine.length <= 48 && !isPreviewLabel(firstLine)) {
+    return firstLine;
+  }
+  var blob = BrowserAgent.text.normalizeText(raw);
+  if (!blob) {
+    return "";
+  }
+  return blob.slice(0, 48);
+}
+
+function looksLikePhoneLabel(text) {
+  var digits = String(text || "").replace(/\D/g, "");
+  return digits.length >= 10 && digits.length <= 15 && /^\+?[\d\s().-]{8,22}$/.test(String(text || "").trim());
+}
+
+function normalizeOpenTitle(raw) {
+  var name = BrowserAgent.text.normalizeText(raw || "");
+  name = name
+    .replace(/\b(last seen|online|typing|click here for contact info|tap here for contact info|click here for group info).*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!name || name.length < 2 || name.length > 48) {
+    return "";
+  }
+  if (looksLikePhoneLabel(name)) {
+    return "";
+  }
+  if (
+    /^(search|menu|mute|video|voice|online|offline|typing|chats|status|about)$/i.test(name) ||
+    /\b(search or start|type a message)\b/i.test(name)
+  ) {
+    return "";
+  }
+  return name;
+}
+
+function pushOpenTitle(list, raw) {
+  var name = normalizeOpenTitle(raw);
+  if (name && list.indexOf(name) === -1) {
+    list.push(name);
+  }
+}
+
+function detectOpenConversationCandidates() {
+  var candidates = [];
+  var main = document.getElementById("main");
+  var header = main ? main.querySelector("header") : null;
+  var nodes;
+  var i;
+  var docTitle;
+  if (header) {
+    nodes = header.querySelectorAll("[title]");
+    for (i = 0; i < nodes.length; i++) {
+      pushOpenTitle(candidates, nodes[i].getAttribute("title"));
+    }
+    nodes = header.querySelectorAll("span, strong, h1, h2, [role='heading']");
+    for (i = 0; i < nodes.length; i++) {
+      pushOpenTitle(candidates, nodes[i].textContent);
+    }
+  }
+  docTitle = String(document.title || "")
+    .replace(/^\(\d+\)\s*/, "")
+    .replace(/\s*[-–|].*$/, "")
+    .trim();
+  pushOpenTitle(candidates, docTitle);
+  return candidates;
+}
+
+function detectOpenConversation() {
+  return detectOpenConversationCandidates()[0] || "";
+}
+
 function getAccessibleName(element) {
   var text = BrowserAgent.text;
   var tag = element.tagName.toLowerCase();
+  var conv = conversationLabel(element);
+  if (conv) {
+    return conv;
+  }
   var ariaLabel = element.getAttribute("aria-label");
   if (ariaLabel) {
+    var aria = text.normalizeText(ariaLabel);
+    if (isConversationRow(element) && aria.length > 80) {
+      return aria.slice(0, 48);
+    }
     return text.truncateText(ariaLabel);
   }
 
@@ -266,6 +399,15 @@ function classifyKind(element) {
   if (tag === "a" || role === "link") {
     return "link";
   }
+  if (
+    role === "listitem" ||
+    role === "row" ||
+    role === "option" ||
+    role === "menuitem" ||
+    role === "tab"
+  ) {
+    return "button";
+  }
   if (tag === "textarea") {
     return "textarea";
   }
@@ -291,6 +433,14 @@ function classifyKind(element) {
   }
   if (tag === "input" || role === "textbox" || role === "searchbox" || element.isContentEditable) {
     return "input";
+  }
+  if (element.tabIndex >= 0 && (tag === "div" || tag === "li" || tag === "article" || tag === "section")) {
+    var cardText = String(element.innerText || element.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (cardText.length <= 200 && /\b(verified|unverified)\b/i.test(cardText)) {
+      return "button";
+    }
   }
   return "text";
 }
@@ -528,6 +678,7 @@ function extractElement(element, inViewport, policy) {
     autocomplete: element.getAttribute("autocomplete") || undefined,
     labelFor: element.tagName.toLowerCase() === "label" ? (element.getAttribute("for") || undefined) : undefined,
     headingLevel: headingLevel(element),
+    ariaSelected: element.getAttribute("aria-selected") === "true" ? true : undefined,
     checked: (kind === "checkbox" || kind === "radio") ? !!element.checked : undefined,
     options: selectOptions(element),
     src: compactSrc(element),
@@ -569,11 +720,60 @@ function isShortParagraph(element) {
   return text.length < 24;
 }
 
+function isAgentOverlay(element) {
+  return Boolean(element && element.closest && element.closest("[data-browser-agent]"));
+}
+
+function pageHasSecurityPinCue() {
+  var text = "";
+  try {
+    text = String(
+      (document.body && (document.body.innerText || document.body.textContent)) ||
+        document.title ||
+        ""
+    ).slice(0, 8000);
+  } catch (error) {
+    text = String(document.title || "");
+  }
+  if (/\b(otp|one[-\s]?time(?:\s*code)?)\b/i.test(text) && !/security\s*pin/i.test(text)) {
+    return false;
+  }
+  return (
+    /security\s*pin/i.test(text) ||
+    /6[\s-]?digit\s+(?:security\s+)?pin/i.test(text) ||
+    /\b(?:m[\s-]?pin|mpin)\b/i.test(text)
+  );
+}
+
+function isLikelyPinInput(element) {
+  if (!element || String(element.tagName || "").toLowerCase() !== "input") {
+    return false;
+  }
+  var type = String(element.getAttribute("type") || element.type || "text").toLowerCase();
+  if (type === "hidden" || type === "checkbox" || type === "radio" || type === "submit" || type === "button") {
+    return false;
+  }
+  var max = Number(element.getAttribute("maxlength") || 0);
+  var mode = String(element.getAttribute("inputmode") || "").toLowerCase();
+  var auto = String(element.getAttribute("autocomplete") || "").toLowerCase();
+  return (
+    type === "password" ||
+    type === "tel" ||
+    type === "number" ||
+    max === 1 ||
+    max === 6 ||
+    mode === "numeric" ||
+    mode === "tel" ||
+    auto === "one-time-code"
+  );
+}
+
 function extractPage(options) {
   var mode = normalizeMode(options && options.mode);
   var policy = BrowserAgent.normalizeSensitivityPolicy
     ? BrowserAgent.normalizeSensitivityPolicy(options && options.sensitivityPolicy)
     : (options && options.sensitivityPolicy) || {};
+  var keepHiddenPinBoxes = pageHasSecurityPinCue();
   var nodes = document.querySelectorAll(RELEVANT_SELECTOR);
   var elements = [];
   var seen = new Set();
@@ -585,7 +785,7 @@ function extractPage(options) {
 
   for (var i = 0; i < nodes.length; i++) {
     var element = nodes[i];
-    if (seen.has(element)) {
+    if (isAgentOverlay(element) || seen.has(element)) {
       continue;
     }
     seen.add(element);
@@ -611,7 +811,9 @@ function extractPage(options) {
     }
 
     if (!passesModeFilter(visibility.visible, visibility.inViewport, mode)) {
-      continue;
+      if (!(keepHiddenPinBoxes && isLikelyPinInput(element))) {
+        continue;
+      }
     }
     if (isShortParagraph(element)) {
       continue;
@@ -635,7 +837,7 @@ function extractPage(options) {
     var textNodes = document.querySelectorAll(VALUE_TEXT_SELECTOR);
     for (var t = 0; t < textNodes.length; t++) {
       var candidate = textNodes[t];
-      if (seen.has(candidate)) {
+      if (isAgentOverlay(candidate) || seen.has(candidate)) {
         continue;
       }
       var ownText = directText(candidate);
@@ -656,6 +858,54 @@ function extractPage(options) {
       elements.push(extractElement(candidate, textVisibility.inViewport, policy));
       valueOnlyElements += 1;
     }
+  }
+
+  var chooserBudget = 8;
+  var chooserScan = document.querySelectorAll(
+    "div, li, article, section, label, [tabindex='0']"
+  );
+  for (var c = 0; c < chooserScan.length && chooserBudget > 0; c++) {
+    var chooser = chooserScan[c];
+    if (isAgentOverlay(chooser) || seen.has(chooser)) {
+      continue;
+    }
+    var chooserText = String(chooser.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (chooserText.length < 6 || chooserText.length > 200) {
+      continue;
+    }
+    if (!/\b(verified|unverified)\b/i.test(chooserText)) {
+      continue;
+    }
+    var target = chooser;
+    var climb = chooser;
+    for (var depth = 0; depth < 8 && climb; depth++) {
+      var climbRole = (climb.getAttribute && (climb.getAttribute("role") || "").toLowerCase()) || "";
+      if (
+        climb.tabIndex >= 0 ||
+        climbRole === "button" ||
+        climbRole === "link" ||
+        climbRole === "option" ||
+        climbRole === "radio" ||
+        climbRole === "listitem" ||
+        (climb.getAttribute && climb.getAttribute("onclick"))
+      ) {
+        target = climb;
+        break;
+      }
+      climb = climb.parentElement;
+    }
+    if (seen.has(target)) {
+      continue;
+    }
+    var chooserVisibility = BrowserAgent.visibility.classifyVisibility(target);
+    if (!passesModeFilter(chooserVisibility.visible, chooserVisibility.inViewport, mode)) {
+      continue;
+    }
+    seen.add(target);
+    elements.push(extractElement(target, chooserVisibility.inViewport, policy));
+    chooserBudget -= 1;
   }
 
   var interactiveInContext = 0;
@@ -700,7 +950,9 @@ function extractPage(options) {
     page: {
       title: document.title || "",
       url: location.href,
-      lang: document.documentElement.lang || undefined
+      lang: document.documentElement.lang || undefined,
+      openConversation: detectOpenConversation() || undefined,
+      openConversationCandidates: detectOpenConversationCandidates()
     },
     viewport: {
       width: window.innerWidth,

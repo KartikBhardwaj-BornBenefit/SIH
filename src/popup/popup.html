@@ -38,7 +38,10 @@
           <span id="analyze-label">Analyze current page</span>
         </button>
 
-        <p id="status" class="status" hidden role="status" aria-live="polite"></p>
+        <div id="status-box" class="status" hidden>
+          <p id="status" role="status" aria-live="polite"></p>
+          <ul id="replacement-list" class="replacement-list" hidden></ul>
+        </div>
       </section>
 
       <section class="secondary-actions">
@@ -80,25 +83,49 @@
             Confirm before transmitting sanitized context
           </label>
           <label>
+            <input id="allow-profile-high-risk" type="checkbox">
+            Allow filling Aadhaar, PAN, and other high-risk profile values
+          </label>
+          <label>
             <input id="allow-destructive" type="checkbox">
             Allow submit/send after confirmation
           </label>
         </div>
         <p class="agent-privacy">
-          Agent mode transmits only locally sanitized context. Raw screenshots,
-          vault values, passwords, OTPs and CVVs are never sent.
+          Agent mode transmits only locally sanitized context and profile
+          availability tokens such as &lt;PROFILE_EMAIL&gt;. Raw screenshots,
+          vault values, passwords, OTPs and CVVs are never sent. Pause with
+          <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd> (or the Pause button)
+          when you need to type; the same shortcut resumes.
         </p>
         <div class="agent-actions">
           <button id="agent-run" type="button">Run agent</button>
+          <button id="agent-pause" class="ghost" type="button" disabled title="Ctrl+Shift+U">Pause for input</button>
           <button id="agent-stop" class="ghost" type="button" disabled>Stop</button>
         </div>
+        <aside id="agent-gate" class="agent-gate" hidden>
+          <div class="agent-gate-head">
+            <span class="agent-gate-pulse" aria-hidden="true"></span>
+            <p class="agent-gate-kicker">Paused for you</p>
+          </div>
+          <h3 id="agent-gate-title">Enter the verification code in the tab</h3>
+          <p id="agent-gate-copy">
+            Type the code in the tab. You can close this popup — the task keeps
+            waiting. Reopen the extension to continue.
+          </p>
+          <button id="agent-continue" type="button">I've finished — continue</button>
+        </aside>
         <p id="agent-error" class="status is-error" hidden role="alert"></p>
 
         <section id="agent-output" class="agent-output" hidden>
           <div class="agent-preview-grid">
             <div>
-              <h3>Sanitized screenshot</h3>
-              <img id="agent-sanitized-preview" alt="Sanitized screenshot sent to the agent server" hidden>
+              <div class="agent-shots-heading">
+                <h3>Sanitized screenshots</h3>
+                <button type="button" id="agent-open-gallery" class="ghost" hidden>View all screens</button>
+              </div>
+              <div id="agent-screenshot-strip" class="agent-shot-strip" hidden></div>
+              <img id="agent-sanitized-preview" alt="Selected sanitized screenshot from this task" hidden>
               <p id="agent-image-note" class="muted">No image transmitted in this mode.</p>
             </div>
             <div>
@@ -149,6 +176,21 @@
           </div>
           <p id="vision-note" class="vision-note">Vision uses a packaged 232 KB YuNet model through the local ONNX runtime. The name model downloads separately on first use.</p>
         </section>
+
+        <details class="policy-panel">
+          <summary>Local fill profile</summary>
+          <p class="policy-help">
+            Saved on this device until you clear it. Any non-empty test value
+            is accepted. The server only sees whether a value exists, never the
+            value. Empty slots stay empty on the page.
+          </p>
+          <form id="profile-form"></form>
+          <p id="profile-status" class="policy-help" hidden></p>
+          <div class="policy-actions">
+            <button type="button" id="profile-save" class="ghost">Save profile</button>
+            <button type="button" id="profile-clear" class="ghost">Clear</button>
+          </div>
+        </details>
 
         <details class="policy-panel">
           <summary>Sensitive data categories</summary>
@@ -272,8 +314,11 @@
     <script src="../utils/sensitivityCatalog.js"></script>
     <script src="../utils/validators.js"></script>
     <script src="../utils/sensitivity.js"></script>
+    <script src="../privacy/profileVault.js"></script>
     <script src="../vision/hybrid/decisionLayer.js"></script>
     <script src="sensitivityForm.js"></script>
+    <script src="profileForm.js"></script>
+    <script src="screenshotFrames.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

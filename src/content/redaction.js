@@ -249,6 +249,17 @@ function build(snapshot, policy, minter) {
       elementId: null,
       field: "page.title"
     });
+    if (agentContext.page.openConversation) {
+      agentContext.page.openConversation = redactString(
+        agentContext.page.openConversation,
+        normalized,
+        minter,
+        {
+          elementId: null,
+          field: "page.openConversation"
+        }
+      );
+    }
     agentContext.page.url = redactString(agentContext.page.url, normalized, minter, {
       elementId: null,
       field: "page.url"
@@ -402,6 +413,7 @@ function collectTexts(agentContext) {
 
   if (agentContext.page) {
     push("page.title", agentContext.page, "title", null);
+    push("page.openConversation", agentContext.page, "openConversation", null);
   }
 
   (agentContext.elements || []).forEach(function (element, position) {

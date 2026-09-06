@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en" class="gallery-page">
+  <head>
+    <meta charset="utf-8">
+    <title>Sanitized screenshots</title>
+    <link rel="stylesheet" href="popup.css">
+    <link rel="stylesheet" href="screenshotGallery.css">
+  </head>
+  <body class="gallery-page">
+    <div class="gallery-shell">
+      <header class="gallery-header">
+        <div>
+          <p class="eyebrow">Last agent task</p>
+          <h1 id="gallery-title">Sanitized screenshots</h1>
+          <p id="gallery-goal" class="gallery-goal"></p>
+        </div>
+        <span class="local-pill" title="These JPEGs were sanitized on-device and are not written to disk">
+          <span class="local-dot"></span>
+          Local memory
+        </span>
+      </header>
+      <p id="gallery-empty" class="gallery-empty">
+        No sanitized screenshots from the last task. Run the agent in Hybrid
+        or Sanitized image mode, then open this view again.
+      </p>
+      <div id="gallery-main" class="gallery-main" hidden>
+        <figure class="gallery-stage">
+          <img id="gallery-image" alt="Selected sanitized screenshot">
+          <figcaption id="gallery-caption"></figcaption>
+        </figure>
+        <aside class="gallery-meta">
+          <p id="gallery-step" class="gallery-kicker"></p>
+          <p id="gallery-url" class="gallery-url"></p>
+          <p id="gallery-flags" class="page-flags"></p>
+          <p class="muted">
+            Titles and URLs are the redacted page snapshot. Raw captures never
+            leave the sanitizer. This window can sit on another screen while
+            the popup stays on the task tab.
+          </p>
+        </aside>
+      </div>
+      <div id="gallery-strip" class="gallery-strip" hidden></div>
+    </div>
+    <script src="screenshotFrames.js"></script>
+    <script src="screenshotGallery.js"></script>
+  </body>
+</html>

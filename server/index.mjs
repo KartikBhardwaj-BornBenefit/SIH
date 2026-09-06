@@ -67,7 +67,17 @@ export function createApp(config = loadConfig()) {
       const protocol = globalThis.BrowserAgent?.agent;
       const parsed = protocol.parseResponse(providerResult);
       if (!parsed.ok) throw new Error(parsed.error);
-      const validated = protocol.validateActions(parsed.actions, checked.value.context);
+      const previous = (checked.value.history || []).slice(-1)[0];
+      const stable = protocol.stabilizeActions(
+        parsed.actions,
+        checked.value.context,
+        previous && previous.elements
+      );
+      const validated = protocol.validateActions(
+        stable.actions,
+        checked.value.context,
+        checked.value.goal
+      );
       if (!validated.ok) throw new Error(validated.error);
       response.json({
         ok: true,
@@ -77,9 +87,11 @@ export function createApp(config = loadConfig()) {
         requestId: String(checked.value.requestId || "").slice(0, 100)
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Agent provider failed.";
+      console.error("Agent provider failed:", message);
       response.status(502).json({
         ok: false,
-        error: error instanceof Error ? error.message : "Agent provider failed."
+        error: message
       });
     }
   });
@@ -98,7 +110,23 @@ export function startServer(config = loadConfig()) {
   const app = createApp(config);
   return app.listen(config.port, "127.0.0.1", () => {
     console.log(`Privacy agent server listening on http://127.0.0.1:${config.port}`);
-    console.log(`Provider: ${config.provider}; sanitized images: ${config.imageEnabled}`);
+    console.log(
+      `Provider: ${config.provider}; model: ${config.model}` +
+        (config.fallbackModels && config.fallbackModels.length
+          ? `; fallback: ${config.fallbackModels.join(", ")}`
+          : "") +
+        `; sanitized images: ${config.imageEnabled}`
+    );
+    if (config.provider !== "mock" && !config.apiKey) {
+      const keyHint = config.openRouter
+        ? "OpenRouter key (sk-or-...)"
+        : config.gemini
+          ? "Google AI Studio key"
+          : "provider API key";
+      console.warn(
+        `No AGENT_API_KEY in server/.env. Paste the ${keyHint} there and restart the server.`
+      );
+    }
   });
 }
 

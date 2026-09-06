@@ -49,6 +49,164 @@ function listIncludes(list, value) {
   return list.indexOf(value) !== -1;
 }
 
+function looksLikeSecurityPinCue(text) {
+  var hay = String(text || "");
+  if (!hay) {
+    return false;
+  }
+  if (/\b(otp|one[-\s]?time(?:\s*code)?|verification\s*code|2fa)\b/i.test(hay) && !/security\s*pin/i.test(hay)) {
+    return false;
+  }
+  return (
+    /security\s*pin/i.test(hay) ||
+    /6[\s-]?digit\s+(?:security\s+)?pin/i.test(hay) ||
+    /\b(?:m[\s-]?pin|mpin)\b/i.test(hay) ||
+    /(?:login|unlock|account)\s*pin/i.test(hay)
+  );
+}
+
+function nodeCueText(node) {
+  if (!node) {
+    return "";
+  }
+  var tag = String(node.tagName || "").toLowerCase();
+  if (tag === "script" || tag === "style" || tag === "nav" || tag === "header" || tag === "svg") {
+    return "";
+  }
+  if (node.querySelector && node.querySelector("input, select, textarea")) {
+    if (!node.querySelectorAll) {
+      return "";
+    }
+    var heads = node.querySelectorAll("h1, h2, h3, h4, [role='heading']");
+    var parts = [];
+    var i;
+    var piece;
+    for (i = 0; i < heads.length && i < 4; i++) {
+      piece = String(heads[i].textContent || "").replace(/\s+/g, " ").trim();
+      if (piece && piece.length <= 120) {
+        parts.push(piece);
+      }
+    }
+    return parts.join(" ");
+  }
+  var text = String(node.textContent || "").replace(/\s+/g, " ").trim();
+  if (!text || text.length > 160) {
+    return "";
+  }
+  return text;
+}
+
+function nearbyHeadingText(element) {
+  if (!element) {
+    return "";
+  }
+  var parts = [];
+  function add(node) {
+    var text = nodeCueText(node);
+    if (text && parts.indexOf(text) === -1) {
+      parts.push(text);
+    }
+  }
+  var current = element;
+  var hops = 0;
+  while (current && hops < 8) {
+    var tag = String(current.tagName || "").toLowerCase();
+    if (tag === "body" || tag === "html") {
+      break;
+    }
+    var sib = current.previousElementSibling;
+    var scanned = 0;
+    while (sib && scanned < 6) {
+      add(sib);
+      sib = sib.previousElementSibling;
+      scanned += 1;
+    }
+    sib = current.nextElementSibling;
+    scanned = 0;
+    while (sib && scanned < 4) {
+      add(sib);
+      sib = sib.nextElementSibling;
+      scanned += 1;
+    }
+    current = current.parentElement;
+    hops += 1;
+  }
+  return parts.join(" ");
+}
+
+function isInDigitBoxCluster(element) {
+  if (!element || !element.parentElement || !element.parentElement.querySelectorAll) {
+    return false;
+  }
+  var current = element;
+  var hops = 0;
+  while (current && current.parentElement && hops < 6) {
+    var inputs = current.parentElement.querySelectorAll("input");
+    var digitish = 0;
+    var i;
+    var el;
+    var type;
+    var max;
+    var mode;
+    for (i = 0; i < inputs.length; i++) {
+      el = inputs[i];
+      type = String(el.type || "").toLowerCase();
+      max = Number(el.getAttribute("maxlength") || 0);
+      mode = String(el.getAttribute("inputmode") || "").toLowerCase();
+      if (
+        (type === "password" || type === "tel" || type === "text" || type === "number") &&
+        (max === 1 || max === 6 || mode === "numeric" || mode === "tel" || type === "password" || type === "tel")
+      ) {
+        digitish += 1;
+      }
+    }
+    if (digitish >= 4 && digitish <= 8) {
+      return true;
+    }
+    current = current.parentElement;
+    hops += 1;
+  }
+  return false;
+}
+
+function looksLikeDigitPinBox(element, ctx) {
+  if (!ctx || !ctx.isField) {
+    return false;
+  }
+  var type = String(ctx.inputType || "").toLowerCase();
+  if (
+    type === "hidden" ||
+    type === "email" ||
+    type === "search" ||
+    type === "url" ||
+    type === "checkbox" ||
+    type === "radio" ||
+    type === "submit" ||
+    type === "button" ||
+    type === "file"
+  ) {
+    return false;
+  }
+  var max = Number((element.getAttribute && element.getAttribute("maxlength")) || 0);
+  var mode = String((element.getAttribute && element.getAttribute("inputmode")) || "").toLowerCase();
+  if (max === 1 || max === 6) {
+    return true;
+  }
+  if (mode === "numeric" || mode === "tel") {
+    return true;
+  }
+  if (ctx.autocomplete === "one-time-code") {
+    return true;
+  }
+  if (type === "tel" || type === "number") {
+    return true;
+  }
+  if (type === "password" || type === "text") {
+    return isInDigitBoxCluster(element);
+  }
+  return false;
+}
+
 function categoryMatchesDom(category, ctx) {
   if (category.source && category.source !== "dom") {
     return false;
@@ -224,8 +382,15 @@ function classifySensitivity(element, extraText, policy, options) {
   }
 
   // 1. Field purpose. Unchanged behaviour: keywords, input types, autocomplete.
+  var headingCue = nearbyHeadingText(element);
+  var pinCue = looksLikeSecurityPinCue(haystack + " " + headingCue);
+  var digitBox = looksLikeDigitPinBox(element, ctx);
+
   catalog.forEach(function (category) {
     if (!policy[category.id]) {
+      return;
+    }
+    if (category.id === "otp" && pinCue && digitBox) {
       return;
     }
     if (!categoryMatchesDom(category, ctx)) {
@@ -233,6 +398,16 @@ function classifySensitivity(element, extraText, policy, options) {
     }
     record(category.id, "field-purpose", "keyword");
   });
+
+  if (
+    isField &&
+    digitBox &&
+    pinCue &&
+    categories.indexOf("cvv") === -1 &&
+    categories.indexOf("security_pin") === -1
+  ) {
+    record("security_pin", "field-purpose", "keyword");
+  }
 
   if (!validators) {
     return {
@@ -308,18 +483,14 @@ function annotatePixelSensitivity(vision, ocr, snapshot, policy) {
     var copy = Object.assign({}, item);
     var cats = [];
     var level = "unknown";
-    if (policy.image_embedded_text && boxOverlapsRegion(item.boundingBox, embeddedRegions)) {
-      cats.push("image_embedded_text");
-      level = strongerLevel(level, "potentially_sensitive");
-    }
-    if (policy.canvas_text && boxOverlapsRegion(item.boundingBox, canvasRegions)) {
-      cats.push("canvas_text");
-      level = strongerLevel(level, "potentially_sensitive");
-    }
     // Same validator layer the DOM path uses, so an Aadhaar number read off
     // pixels is held to the same checksum as one read out of the DOM. No
     // corroboration text is available here, so "shape"-only matchers
     // (voter id, passport) stay silent by design.
+    //
+    // Ordinary painted words — "Government of India", slogans, labels — are
+    // not secrets. Tagging every OCR line inside an <img> as sensitive was
+    // blacking out entire ID cards.
     if (BrowserAgent.validators) {
       BrowserAgent.validators
         .findValues(item.text || "", policy, { offsets: false })
@@ -330,6 +501,12 @@ function annotatePixelSensitivity(vision, ocr, snapshot, policy) {
           var category = catalogById[hit.category];
           level = strongerLevel(level, category ? category.level : "potentially_sensitive");
         });
+    }
+    if (cats.length && policy.image_embedded_text && boxOverlapsRegion(item.boundingBox, embeddedRegions)) {
+      cats.push("image_embedded_text");
+    }
+    if (cats.length && policy.canvas_text && boxOverlapsRegion(item.boundingBox, canvasRegions)) {
+      cats.push("canvas_text");
     }
     copy.sensitivityCategories = cats;
     copy.sensitivity = level;

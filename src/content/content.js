@@ -31,6 +31,50 @@ if (!globalThis.__browserAgentInstalled) {
    */
   var sessionVault = null;
   var sessionMinter = null;
+  var lastAgentElements = [];
+  var agentKeepalivePort = null;
+  var authGateWatchTimer = null;
+  var authGateWatchObserver = null;
+  var authGateWatchSig = "";
+  var authGateWatchOptions = { mode: "visible", sensitivityPolicy: null };
+  var pauseBannerEl = null;
+
+  function hidePauseBanner() {
+    if (pauseBannerEl && pauseBannerEl.parentNode) {
+      pauseBannerEl.parentNode.removeChild(pauseBannerEl);
+    }
+    pauseBannerEl = null;
+  }
+
+  function showPauseBanner(title, shortcut) {
+    hidePauseBanner();
+    var el = document.createElement("div");
+    el.setAttribute("data-browser-agent", "pause-banner");
+    el.setAttribute("role", "status");
+    el.style.cssText = [
+      "position:fixed",
+      "top:12px",
+      "left:50%",
+      "transform:translateX(-50%)",
+      "z-index:2147483647",
+      "pointer-events:none",
+      "max-width:min(520px, calc(100vw - 24px))",
+      "padding:10px 14px",
+      "border-radius:10px",
+      "background:rgba(20,18,10,0.92)",
+      "color:#f3e6c0",
+      "font:600 13px/1.35 system-ui,sans-serif",
+      "box-shadow:0 8px 24px rgba(0,0,0,0.35)",
+      "text-align:center"
+    ].join(";");
+    el.textContent =
+      (title || "Waiting for your input") +
+      " · " +
+      (shortcut || "Ctrl+Shift+U") +
+      " to resume";
+    (document.body || document.documentElement).appendChild(el);
+    pauseBannerEl = el;
+  }
 
   /**
    * Categories that only a model can find. If none of them is enabled we skip
@@ -46,6 +90,91 @@ if (!globalThis.__browserAgentInstalled) {
     return MODEL_CATEGORIES.some(function (category) {
       return Boolean(normalized[category]);
     });
+  }
+
+  function connectAgentKeepalive() {
+    if (agentKeepalivePort) {
+      return;
+    }
+    try {
+      agentKeepalivePort = chrome.runtime.connect({ name: "agent-keepalive" });
+      agentKeepalivePort.onDisconnect.addListener(function () {
+        agentKeepalivePort = null;
+      });
+    } catch (error) {
+      agentKeepalivePort = null;
+    }
+  }
+
+  function stopAuthGateWatch() {
+    if (authGateWatchTimer) {
+      clearInterval(authGateWatchTimer);
+      authGateWatchTimer = null;
+    }
+    if (authGateWatchObserver) {
+      authGateWatchObserver.disconnect();
+      authGateWatchObserver = null;
+    }
+    authGateWatchSig = "";
+  }
+
+  function probeAuthGateNow() {
+    var snapshot = BrowserAgent.extractPage({
+      mode: authGateWatchOptions.mode,
+      sensitivityPolicy: authGateWatchOptions.sensitivityPolicy
+    });
+    var gate =
+      BrowserAgent.agent && BrowserAgent.agent.findAuthGate
+        ? BrowserAgent.agent.findAuthGate(snapshot)
+        : { present: false, blocking: false, kind: "", emptyCount: 0, filledCount: 0 };
+    return {
+      gate: gate,
+      url: (snapshot.page && snapshot.page.url) || location.href
+    };
+  }
+
+  function postAuthGateIfChanged() {
+    var result = probeAuthGateNow();
+    var sig = [
+      result.gate.blocking ? "1" : "0",
+      result.gate.present ? "1" : "0",
+      result.gate.kind || "",
+      result.gate.emptyCount || 0,
+      result.gate.filledCount || 0,
+      String(result.url || "").split("#")[0]
+    ].join("|");
+    if (sig === authGateWatchSig) {
+      return;
+    }
+    authGateWatchSig = sig;
+    chrome.runtime
+      .sendMessage({
+        type: BrowserAgent.MSG.AUTH_GATE_UPDATE,
+        gate: result.gate,
+        url: result.url
+      })
+      .catch(function () {});
+  }
+
+  function startAuthGateWatch(message) {
+    connectAgentKeepalive();
+    authGateWatchOptions = {
+      mode: (message && message.mode) || "visible",
+      sensitivityPolicy: (message && message.sensitivityPolicy) || null
+    };
+    stopAuthGateWatch();
+    postAuthGateIfChanged();
+    authGateWatchTimer = setInterval(postAuthGateIfChanged, 800);
+    if (typeof MutationObserver === "function") {
+      authGateWatchObserver = new MutationObserver(function () {
+        postAuthGateIfChanged();
+      });
+      authGateWatchObserver.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        characterData: true
+      });
+    }
   }
 
   /**
@@ -192,6 +321,59 @@ if (!globalThis.__browserAgentInstalled) {
       return;
     }
 
+    if (message.type === BrowserAgent.MSG.AGENT_KEEPALIVE_START) {
+      connectAgentKeepalive();
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message.type === BrowserAgent.MSG.AUTH_GATE_WATCH_START) {
+      startAuthGateWatch(message);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message.type === BrowserAgent.MSG.AUTH_GATE_WATCH_STOP) {
+      stopAuthGateWatch();
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message.type === BrowserAgent.MSG.AGENT_PAUSE_BANNER) {
+      if (message.show) {
+        showPauseBanner(message.title, message.shortcut);
+      } else {
+        hidePauseBanner();
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message.type === BrowserAgent.MSG.AUTH_GATE_PROBE) {
+      try {
+        var snapshot = BrowserAgent.extractPage({
+          mode: message.mode,
+          sensitivityPolicy: message.sensitivityPolicy
+        });
+        var gate =
+          BrowserAgent.agent && BrowserAgent.agent.findAuthGate
+            ? BrowserAgent.agent.findAuthGate(snapshot)
+            : { present: false, blocking: false, kind: "", emptyCount: 0, filledCount: 0 };
+        sendResponse({
+          ok: true,
+          gate: gate,
+          url: snapshot.page && snapshot.page.url,
+          title: snapshot.page && snapshot.page.title
+        });
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error: error && error.message ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
     /**
      * One agent turn's extract + redact. The goal is rewritten against the
      * vault (and the identifier validators) before it leaves this world, so
@@ -207,6 +389,10 @@ if (!globalThis.__browserAgentInstalled) {
             mode: message.mode,
             sensitivityPolicy: message.sensitivityPolicy
           });
+          var goalChatOpen = false;
+          if (BrowserAgent.agent && BrowserAgent.agent.markGoalChatOpen) {
+            goalChatOpen = BrowserAgent.agent.markGoalChatOpen(snapshot, message.goal || "");
+          }
           var domExtractionMs = Math.round(performance.now() - extractionStart);
           var ruleStart = performance.now();
           var safe = BrowserAgent.redaction.build(
@@ -223,8 +409,52 @@ if (!globalThis.__browserAgentInstalled) {
           }
           sessionVault = safe.vault;
           sessionMinter = safe.minter;
+          lastAgentElements = (safe.agentContext && safe.agentContext.elements) || [];
+          if (safe.agentContext && safe.agentContext.page) {
+            safe.agentContext.page.goalChatOpen = goalChatOpen;
+          }
+
+          var profileStore =
+            BrowserAgent.profileVault && BrowserAgent.profileVault.load
+              ? await BrowserAgent.profileVault.load()
+              : { values: {} };
+          var profileMap =
+            BrowserAgent.profileVault && BrowserAgent.profileVault.applyMap
+              ? BrowserAgent.profileVault.applyMap(profileStore)
+              : {};
+
+          var filledSecurityPin = false;
+          if (
+            profileMap["<PROFILE_SECURITY_PIN>"] &&
+            BrowserAgent.agentApply &&
+            BrowserAgent.agentApply.fillSavedSecurityPin
+          ) {
+            var pinFill = BrowserAgent.agentApply.fillSavedSecurityPin(profileMap);
+            if (pinFill && pinFill.filled) {
+              filledSecurityPin = true;
+              snapshot = BrowserAgent.extractPage({
+                mode: message.mode,
+                sensitivityPolicy: message.sensitivityPolicy
+              });
+              if (BrowserAgent.agent && BrowserAgent.agent.markGoalChatOpen) {
+                goalChatOpen = BrowserAgent.agent.markGoalChatOpen(snapshot, message.goal || "");
+              }
+              safe = BrowserAgent.redaction.build(
+                snapshot,
+                message.sensitivityPolicy,
+                sessionMinter || undefined
+              );
+              sessionVault = safe.vault;
+              sessionMinter = safe.minter;
+              lastAgentElements = (safe.agentContext && safe.agentContext.elements) || [];
+              if (safe.agentContext && safe.agentContext.page) {
+                safe.agentContext.page.goalChatOpen = goalChatOpen;
+              }
+            }
+          }
 
           var outboundGoal = BrowserAgent.agent.redactAgainstVault(message.goal || "", safe.vault);
+          outboundGoal = BrowserAgent.agent.redactAgainstVault(outboundGoal, profileMap);
           if (BrowserAgent.redaction.redactText) {
             outboundGoal = BrowserAgent.redaction.redactText(
               outboundGoal,
@@ -238,7 +468,8 @@ if (!globalThis.__browserAgentInstalled) {
           var prepared = BrowserAgent.agent.prepareOutbound(
             outboundGoal,
             safe.agentContext,
-            safe.vault
+            safe.vault,
+            profileStore
           );
           if (!prepared.ok) {
             sendResponse({ ok: false, error: prepared.error });
@@ -246,7 +477,7 @@ if (!globalThis.__browserAgentInstalled) {
           }
           var historyLeaks = BrowserAgent.agent.findLeaks(
             JSON.stringify(message.history || []),
-            safe.vault
+            Object.assign({}, safe.vault, profileMap)
           );
           if (historyLeaks.length) {
             sendResponse({
@@ -262,6 +493,7 @@ if (!globalThis.__browserAgentInstalled) {
             snapshot: safe.agentContext,
             redaction: safe.redaction,
             ner: ner,
+            filledSecurityPin: filledSecurityPin,
             timings: {
               domExtractionMs: domExtractionMs,
               ruleRedactionMs: ruleRedactionMs,
@@ -280,18 +512,37 @@ if (!globalThis.__browserAgentInstalled) {
     }
 
     if (message.type === BrowserAgent.MSG.APPLY_ACTIONS) {
-      try {
-        if (!BrowserAgent.agentApply) {
-          sendResponse({ ok: false, error: "Action applicator is not loaded." });
-          return;
+      (async function () {
+        try {
+          if (!BrowserAgent.agentApply) {
+            sendResponse({ ok: false, error: "Action applicator is not loaded." });
+            return;
+          }
+          var profileStore =
+            BrowserAgent.profileVault && BrowserAgent.profileVault.load
+              ? await BrowserAgent.profileVault.load()
+              : { values: {} };
+          var profileMap =
+            BrowserAgent.profileVault && BrowserAgent.profileVault.applyMap
+              ? BrowserAgent.profileVault.applyMap(profileStore)
+              : {};
+          sendResponse(
+            BrowserAgent.agentApply.applyActions(message.actions || [], sessionVault, {
+              profileMap: profileMap,
+              elements: lastAgentElements,
+              allowHighRisk: Boolean(message.allowHighRiskProfile),
+              goal: message.goal || "",
+              vault: sessionVault
+            })
+          );
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            error: error && error.message ? error.message : String(error)
+          });
         }
-        sendResponse(BrowserAgent.agentApply.applyActions(message.actions || [], sessionVault));
-      } catch (error) {
-        sendResponse({
-          ok: false,
-          error: error && error.message ? error.message : String(error)
-        });
-      }
+      })();
+      return true;
     }
   });
 }

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Bootstrap grid form</title>
+  </head>
+  <body>
+    <!--
+      RoboForm-style layout: the visible label is a sibling column, not a
+      <label for>. Names like 10address1 have no word boundary before
+      "address", so classification has to use the nearby label or a
+      concatenated address1 pattern.
+    -->
+    <h1>Form Filler: Test Form – All Fields</h1>
+    <form class="container">
+      <div class="row">
+        <div class="col-xs-6 text-right">Title</div>
+        <div class="col-xs-6"><input type="text" name="01___title" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">First Name</div>
+        <div class="col-xs-6"><input type="text" name="02frstname" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Middle Initial</div>
+        <div class="col-xs-6"><input type="text" name="03middle_i" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Last Name</div>
+        <div class="col-xs-6"><input type="text" name="04lastname" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Full Name</div>
+        <div class="col-xs-6"><input type="text" name="04fullname" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Company</div>
+        <div class="col-xs-6"><input type="text" name="05_company" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Position</div>
+        <div class="col-xs-6"><input type="text" name="06position" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Address Line 1</div>
+        <div class="col-xs-6"><input type="text" name="10address1" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Address Line 2</div>
+        <div class="col-xs-6"><input type="text" name="11address2" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">City</div>
+        <div class="col-xs-6"><input type="text" name="13adr_city" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">State / Province</div>
+        <div class="col-xs-6"><input type="text" name="14adrstate" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Country</div>
+        <div class="col-xs-6"><input type="text" name="15_country" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Zip</div>
+        <div class="col-xs-6"><input type="text" name="16addr_zip" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Fax</div>
+        <div class="col-xs-6"><input type="text" name="18____fax" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Cell Phone</div>
+        <div class="col-xs-6"><input type="text" name="22cellphone" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">E-mail</div>
+        <div class="col-xs-6"><input type="text" name="24emailadr" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Web Site</div>
+        <div class="col-xs-6"><input type="text" name="25_website" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">User ID</div>
+        <div class="col-xs-6"><input type="text" name="30__userid" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Credit Card Type</div>
+        <div class="col-xs-6">
+          <select name="32_cctype">
+            <option>(Select Card Type)</option>
+            <option>Visa (Preferred)</option>
+            <option>Master Card</option>
+            <option>American Express</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Card User Name</div>
+        <div class="col-xs-6"><input type="text" name="40cc_user" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Card Issuing Bank</div>
+        <div class="col-xs-6"><input type="text" name="41cc_bank" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Card Customer Service Phone</div>
+        <div class="col-xs-6"><input type="text" name="42cc_cserv" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Sex</div>
+        <div class="col-xs-6"><input type="text" name="50___sex" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Social Security Number</div>
+        <div class="col-xs-6"><input type="text" name="51soc_sec" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Driver License Number</div>
+        <div class="col-xs-6"><input type="text" name="52drivlic" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Date Of Birth</div>
+        <div class="col-xs-6"><input type="text" name="53___dob" value="" placeholder="Any format"></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Age</div>
+        <div class="col-xs-6"><input type="text" name="54___age" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Birth Place</div>
+        <div class="col-xs-6"><input type="text" name="55bthplace" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Income</div>
+        <div class="col-xs-6"><input type="text" name="56_income" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Custom Message</div>
+        <div class="col-xs-6"><input type="text" name="90custmsg" value=""></div>
+      </div>
+      <div class="row">
+        <div class="col-xs-6 text-right">Comments</div>
+        <div class="col-xs-6"><input type="text" name="91comment" value=""></div>
+      </div>
+    </form>
+  </body>
+</html>

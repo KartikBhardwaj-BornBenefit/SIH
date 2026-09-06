@@ -38,6 +38,24 @@ var SENSITIVITY_CATEGORIES = [
     patterns: [/\botp\b/i, /one[-\s]?time/i, /one[-\s]?time[-\s]?code/i, /ओटीपी/, /एकबारीय/]
   },
   {
+    id: "security_pin",
+    group: "credentials",
+    groupLabel: "Credentials",
+    label: "DigiLocker security PIN",
+    description: "Saved login PIN (DigiLocker / mPIN). Not an SMS OTP and not a postal PIN code.",
+    source: "dom",
+    level: "sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [
+      /security\s*pin/i,
+      /6[\s-]?digit\s+(?:security\s+)?pin/i,
+      /\b(?:m[\s-]?pin|mpin)\b/i,
+      /digilocker.{0,32}\bpin\b/i,
+      /(?:login|unlock|account)\s*pin/i
+    ]
+  },
+  {
     id: "authentication_secret",
     group: "credentials",
     groupLabel: "Credentials",
@@ -66,7 +84,12 @@ var SENSITIVITY_CATEGORIES = [
     defaultEnabled: true,
     fieldOnly: true,
     autocomplete: ["username"],
-    patterns: [/user\s*name/i, /username/i, /(?:उपयोगकर्ता|प्रयोगकर्ता)\s*नाम/]
+    patterns: [
+      /(?<!\bcard\s)user\s*name/i,
+      /(?<!\bcard\s)username/i,
+      /\buser\s*id\b/i,
+      /(?:उपयोगकर्ता|प्रयोगकर्ता)\s*नाम/
+    ]
   },
   {
     id: "payment_card",
@@ -88,6 +111,19 @@ var SENSITIVITY_CATEGORIES = [
     ]
   },
   {
+    id: "card_type",
+    group: "payments",
+    groupLabel: "Payments & banking",
+    label: "Credit card type",
+    description: "Visa / Mastercard / Amex style card-type fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    autocomplete: ["cc-type"],
+    patterns: [/(?:credit\s*)?card\s*type/i, /\bcc[-_]?type\b/i]
+  },
+  {
     id: "cvv",
     group: "payments",
     groupLabel: "Payments & banking",
@@ -99,6 +135,47 @@ var SENSITIVITY_CATEGORIES = [
     fieldOnly: true,
     autocomplete: ["cc-csc"],
     patterns: [/\bcvv\b|\bcvc\b|\bcvv2\b/i, /security\s*code/i, /सीवीवी/]
+  },
+  {
+    id: "card_holder_name",
+    group: "payments",
+    groupLabel: "Payments & banking",
+    label: "Card user / holder name",
+    description: "Name printed on a payment card.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    autocomplete: ["cc-name"],
+    patterns: [
+      /card\s*(?:user|holder)\s*name/i,
+      /name\s*on\s*(?:the\s*)?card/i,
+      /cardholder/i
+    ]
+  },
+  {
+    id: "card_issuing_bank",
+    group: "payments",
+    groupLabel: "Payments & banking",
+    label: "Card issuing bank",
+    description: "Bank that issued a payment card.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [/card\s*issuing\s*bank/i, /issuing\s*bank/i]
+  },
+  {
+    id: "card_service_phone",
+    group: "payments",
+    groupLabel: "Payments & banking",
+    label: "Card customer service phone",
+    description: "Issuer customer-service numbers on card forms.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [/customer\s*service\s*phone/i, /card\s*customer\s*service/i]
   },
   {
     id: "bank_account",
@@ -156,14 +233,48 @@ var SENSITIVITY_CATEGORIES = [
     inputTypes: ["tel"],
     autocomplete: ["tel", "tel-national", "tel-local"],
     // /फ़?ोन/ covers both फ़ोन and फोन: the nukta is a separate combining mark.
-    patterns: [/phone/i, /mobile/i, /\btel\b/i, /whatsapp/i, /मोबाइल/, /फ़?ोन/, /दूरभाष/]
+    patterns: [
+      /(?<!\b(?:customer\s*service|service)\s+)phone/i,
+      /mobile/i,
+      /\btel\b/i,
+      /whatsapp/i,
+      /मोबाइल/,
+      /फ़?ोन/,
+      /दूरभाष/
+    ]
+  },
+  {
+    id: "fax",
+    group: "contact",
+    groupLabel: "Contact details",
+    label: "Fax",
+    description: "Fax number fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [/\bfax\b/i, /[_-]fax\b/i]
+  },
+  {
+    id: "website",
+    group: "contact",
+    groupLabel: "Contact details",
+    label: "Website",
+    description: "Personal or company website fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    inputTypes: ["url"],
+    autocomplete: ["url"],
+    patterns: [/web\s*site/i, /\bwebsite\b/i, /\bhomepage\b/i]
   },
   {
     id: "address",
     group: "contact",
     groupLabel: "Contact details",
-    label: "Address / PIN code",
-    description: "Street address, city, and postal code fields.",
+    label: "Address",
+    description: "Street address, city, locality, and landmark fields.",
     source: "dom",
     level: "potentially_sensitive",
     defaultEnabled: true,
@@ -172,31 +283,60 @@ var SENSITIVITY_CATEGORIES = [
       "address-line1",
       "address-line2",
       "address-level1",
-      "address-level2",
-      "postal-code"
+      "address-level2"
     ],
     // "address" is the most overloaded word in the catalog: an email address,
     // an IP address and "address your complaint to us" are all non-postal, and
     // a bare /address/i flagged all three. Qualified forms match outright; the
     // bare word carries lookarounds so the wrong senses are rejected in place
-    // rather than vetoing the whole element.
+    // rather than vetoing the whole element. PIN / ZIP live in pin_code.
     patterns: [
       /\b(?:street|postal|mailing|billing|shipping|delivery|residential|permanent|correspondence|registered|home|office)\s+address\b/i,
       /\baddress\s*(?:line)?\s*[12]\b/i,
+      // Digit-prefixed names such as RoboForm's 10address1 have no word
+      // boundary before "address" (\d is a word character), so the spaced
+      // "address line 1" pattern above never sees them.
+      /address(?:[-_]?line)?[-_]?[12]\b/i,
       /(?<!\b(?:e-?mail|ip|mac|web|url|wallet|crypto)\s{0,2})\baddress\b(?!\s+(?:your|the|this|my|our|its|their|a|any|all|it|them|these|those)\b)/i,
-      /\bpincode\b/i,
-      /\bpin\s*code\b/i,
-      /\bpostal\s*code\b/i,
-      /\bzip\s*code\b/i,
-      /\bzip\b(?!\s*(?:file|archive|folder|download|drive))/i,
       /\blocality\b/i,
       /\blandmark\b/i,
       // Hindi. Same split: qualified forms, then the bare word guarded against
       // the "पता है / पता नहीं" (to know) sense.
       /(?:डाक|पूरा|स्थायी|वर्तमान|निवास|पत्राचार)\s*पता/,
-      /पता(?!\s*(?:है|हैं|नहीं|नही|चला|चल|लगा|लगाना|करें|कर|करना))/,
+      /पता(?!\s*(?:है|हैं|नहीं|नही|चला|चल|लगा|लगाना|करें|कर|करना))/
+    ]
+  },
+  {
+    id: "pin_code",
+    group: "contact",
+    groupLabel: "Contact details",
+    label: "PIN code",
+    description: "Indian PIN, ZIP, and postal-code fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    autocomplete: ["postal-code"],
+    patterns: [
+      /\bpincode\b/i,
+      /\bpin\s*code\b/i,
+      /\bpostal\s*code\b/i,
+      /\bzip\s*code\b/i,
+      /\bzip\b(?!\s*(?:file|archive|folder|download|drive))/i,
       /पिन\s*कोड/
     ]
+  },
+  {
+    id: "country",
+    group: "contact",
+    groupLabel: "Contact details",
+    label: "Country",
+    description: "Country fields on address forms.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    autocomplete: ["country", "country-name"],
+    patterns: [/\bcountry\b/i]
   },
   {
     id: "person_name",
@@ -221,6 +361,64 @@ var SENSITIVITY_CATEGORIES = [
     ]
   },
   {
+    id: "person_title",
+    group: "identity",
+    groupLabel: "Personal identity",
+    label: "Title (Mr/Ms)",
+    description: "Honorific title fields such as Mr, Ms, or Dr. Not a job title.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    autocomplete: ["honorific-prefix"],
+    patterns: [
+      /(?<![A-Za-z])(?<!(?:job|page|document|post|working)\s)title\b/i,
+      /\b(?:honorific|salutation)\b/i
+    ]
+  },
+  {
+    id: "middle_initial",
+    group: "identity",
+    groupLabel: "Personal identity",
+    label: "Middle initial",
+    description: "Middle name or middle-initial fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    autocomplete: ["additional-name"],
+    patterns: [/middle\s*initial/i, /middle[-_\s]?name/i, /middle_i\b/i]
+  },
+  {
+    id: "company",
+    group: "identity",
+    groupLabel: "Personal identity",
+    label: "Company",
+    description: "Employer or organization name fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    autocomplete: ["organization"],
+    patterns: [
+      /(?<![A-Za-z])company(?:\s*name)?\b(?!\.(?:co|com|org|net|io|in)\b)/i,
+      /\b(?:employer|organi[sz]ation)\b/i
+    ]
+  },
+  {
+    id: "position",
+    group: "identity",
+    groupLabel: "Personal identity",
+    label: "Position / job title",
+    description: "Job title, position, and designation fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    autocomplete: ["organization-title"],
+    patterns: [/(?<![A-Za-z])position\b/i, /\bjob\s*title\b/i, /\b(?:designation|occupation)\b/i]
+  },
+  {
     id: "date_of_birth",
     group: "identity",
     groupLabel: "Personal identity",
@@ -237,6 +435,54 @@ var SENSITIVITY_CATEGORIES = [
       /जन्म\s*(?:तिथि|दिनांक)/,
       /जन्म\s*की\s*तारीख/
     ]
+  },
+  {
+    id: "sex",
+    group: "identity",
+    groupLabel: "Personal identity",
+    label: "Sex / gender",
+    description: "Sex and gender fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [/\b(?:sex|gender)\b/i]
+  },
+  {
+    id: "age",
+    group: "identity",
+    groupLabel: "Personal identity",
+    label: "Age",
+    description: "Age fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [/\bage\b/i]
+  },
+  {
+    id: "birth_place",
+    group: "identity",
+    groupLabel: "Personal identity",
+    label: "Birth place",
+    description: "Place of birth fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [/birth\s*place/i, /place\s*of\s*birth/i, /जन्म\s*स्थान/]
+  },
+  {
+    id: "income",
+    group: "identity",
+    groupLabel: "Personal identity",
+    label: "Income",
+    description: "Income and salary fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [/\bincome\b/i, /\bsalary\b/i]
   },
   {
     id: "aadhaar",
@@ -310,6 +556,42 @@ var SENSITIVITY_CATEGORIES = [
     patterns: [/\bssn\b/i, /social\s*security/i]
   },
   {
+    id: "driver_license",
+    group: "gov_id",
+    groupLabel: "Government IDs",
+    label: "Driver license",
+    description: "Driver license number fields.",
+    source: "dom",
+    level: "sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [/driver'?s?\s*licen[cs]e/i]
+  },
+  {
+    id: "custom_message",
+    group: "form_extras",
+    groupLabel: "Other form fields",
+    label: "Custom message",
+    description: "Custom message fields on long test forms.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [/custom\s*message/i]
+  },
+  {
+    id: "comments",
+    group: "form_extras",
+    groupLabel: "Other form fields",
+    label: "Comments",
+    description: "Comments and notes fields.",
+    source: "dom",
+    level: "potentially_sensitive",
+    defaultEnabled: true,
+    fieldOnly: true,
+    patterns: [/\bcomments?\b/i]
+  },
+  {
     id: "faces_people",
     group: "visual",
     groupLabel: "Visual / pixels",
@@ -324,7 +606,7 @@ var SENSITIVITY_CATEGORIES = [
     group: "visual",
     groupLabel: "Visual / pixels",
     label: "Text inside images",
-    description: "OCR text found in screenshots or <img> pixels.",
+    description: "Marks identifier values OCR reads inside screenshots or <img> pixels. Ordinary labels and slogans stay visible.",
     source: "ocr",
     level: "potentially_sensitive",
     defaultEnabled: true
@@ -334,7 +616,7 @@ var SENSITIVITY_CATEGORIES = [
     group: "visual",
     groupLabel: "Visual / pixels",
     label: "Text painted on canvas",
-    description: "OCR text when the page has a <canvas>.",
+    description: "Marks identifier values OCR reads on a <canvas>. Ordinary painted UI text stays visible.",
     source: "ocr",
     level: "potentially_sensitive",
     defaultEnabled: true
